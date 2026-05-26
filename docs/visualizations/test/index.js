@@ -22,7 +22,7 @@ function rk4Step(x, y, t, dt, params) {
   const f = (x, y, t) => {
     const envA = Kenv(t, params.freq, params.startInA) === 1;
 
-    const K = envA ? 1 : 2;
+    const K = envA ? params.k1 : params.k2;
     const alphaE = envA ? params.alpha1 : params.alpha2;
     const gamma = 1;
 
@@ -54,6 +54,8 @@ function runSimulation() {
     r: parseFloat(document.getElementById("r").value),
     alpha1: parseFloat(document.getElementById("alpha1").value),
     alpha2: parseFloat(document.getElementById("alpha2").value),
+    k1: parseFloat(document.getElementById("k1").value),
+    k2: parseFloat(document.getElementById("k2").value),
     startInA: document.getElementById("startInA").checked
   };
 
@@ -151,7 +153,7 @@ function drawPhase(xs, ys) {
 // ----------------------------
 // Events
 // ----------------------------
-["freq","r","alpha1","alpha2","x0","y0","Ttotal","startInA"]
+["freq","r","alpha1","alpha2","k1","k2","x0","y0","Ttotal","startInA"]
   .forEach(id => document.getElementById(id).addEventListener("input", runSimulation));
 
 document.getElementById("runBtn").addEventListener("click", runSimulation);
