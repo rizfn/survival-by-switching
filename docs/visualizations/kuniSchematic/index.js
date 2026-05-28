@@ -271,8 +271,6 @@ function toggleEnvironment() {
     // Clear fully on transition
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
-    
-    initParticles();
 }
 
 document.addEventListener('keydown', (e) => {
