@@ -124,3 +124,90 @@ The finite switching critical period ($T_{crit}$) roughly estimates the maximum 
 * By setting $p$ to $p_{opt}$, we maximize the "slack" in the system's average growth. 
 * A maximized $y^*$ and $\lambda_{fast}$ typically means the system is furthest from the extinction boundary, granting maximum tolerance for slower switching. 
 * Therefore, the optimal duty cycle $p_{opt}$ that maximizes $y^*$ generally correlates with maximizing the allowable switching period (lowering the critical switching frequency).
+
+### More thorough duty cycle math (from the overleaf file)
+
+     
+In the main text, $p_\text{opt}$ was defined as the duty cycle maximizing the steady-state predator density $y^\star(p)$. However, there are other natural ways to define an `optimal' duty cycle!
+    
+An alternative criterion is to maximize the invasion exponent (the per-capita growth rate of the predator when starting from near-extinction). In the fast-switching limit, we can calculate $\lambda_\text{fast}$ by looking at how $y$ grows when near the boundary $y\approx 0$. Using this condition in \autoref{eq:duty-cycle-fast-dxdt}, we can find the steady-state prey density when the predator is absent:
+
+$$
+\begin{align}
+    0 &= \left( \bar{r}(p) - \bar{c}(p) x^\star\right)x^\star \\
+    x^\star &= \frac{\bar{r}(p)}{\bar{c}(p)}
+\end{align}
+$$
+
+Which we can use in \autoref{eq:duty-cycle-fast-dydt}, to obtain
+
+$$
+\begin{align}
+    \frac{\mathrm{d}y}{\mathrm{d}t} &= \left( x^\star-\bar{\gamma}(p) \right) y \\
+    \frac1y \frac{\mathrm{d}y}{\mathrm{d}t} &=  \frac{\bar{r}(p)}{\bar{c}(p)}-\bar{\gamma}(p)
+\end{align}
+$$
+
+As $1/y \cdot\mathrm{d}y/\mathrm{d}t = \mathrm{d}(\ln\!y)/\mathrm{d}t = \lambda_\text{fast}$, we can write
+
+$$
+\begin{equation}
+    \lambda_\text{fast}(p) = \frac{\bar{r}(p)}{\bar{c}(p)} - \bar{\gamma}(p)
+\end{equation}
+$$
+
+To find $p_\text{opt}^\lambda$, we set $\mathrm{d}\lambda_\text{fast}/\mathrm{d}p = 0$. Applying the quotient rule:
+    
+$$
+\begin{align}
+    \frac{\mathrm{d}\lambda_\text{fast}}{\mathrm{d}p} &= \frac{\dfrac{\mathrm{d}\bar{r}(p)}{\mathrm{d}p}\,\bar{c}(p) - \bar{r}(p)\,\dfrac{\mathrm{d}\bar{c}(p)}{\mathrm{d}p}}{\left(\bar{c}(p)\right)^2} - \frac{\mathrm{d}\bar{\gamma}(p)}{\mathrm{d}p} \\
+    0 &= \frac{(\Delta r)(p_\text{opt}^\lambda\Delta c + c_2) - (p_\text{opt}^\lambda\Delta r + r_2)(\Delta c)}{\left(p_\text{opt}^\lambda \Delta c + c_2\right)^2} - \Delta\gamma \\
+    \Delta\gamma \left(p_\text{opt}^\lambda \Delta c + c_2\right)^2 &= p_\text{opt}^\lambda\left(\Delta r \Delta c - \Delta r \Delta c\right) + c_2 \Delta r - r_2 \Delta c \\
+    p_\text{opt}^\lambda \Delta c + c_2 &= \sqrt{\frac{c_2 \Delta r - r_2 \Delta c}{\Delta\gamma}} \\
+    p_\text{opt}^\lambda &= \frac{1}{\Delta c} \left( \sqrt{\frac{c_2 - r_2}{\Delta\gamma}} - c_2\right)
+\end{align}
+$$
+
+Another potential criterion to optimize for is $T_c$, the critical frequency at which switching can rescue the predator. As $T_c$ will depend on $p$, we can calculate $p_\text{opt}^{T_c}$, where $T_c$ is maximized.
+
+The derivation itself resembles its counterpart in \autoref{appendix:critical-frequency-derivation}. Now, the time spent in environment $A$, $\tau_A = pT$, while the time in environment $B$ is now $\tau_B = (1-p)T$.
+
+The dynamics of $x$ in a fixed environment are still given by \autoref{eq:tc-derivation-x-flow-fixed-env}. However, if we have a limit cycle where the prey moves from $x_B^\star$ to $x_A^\star$ in the first wave, and from $x_A^\star$ to $x_B^\star$ in the second, we now have
+
+$$
+\begin{equation} 
+    x_A^\star = x_A\left(pT;\, x_B^\star\right), \qquad x_B^\star = x_B\left((1-p)T;\, x_A^\star\right)
+\end{equation}
+$$
+
+By integrating the flow, we obtain
+
+$$
+\begin{equation}
+    \int_0^\tau x_E(t; x_{\mathrm{in}})\,dt = K_E\tau - \frac{K_E}{r_E}\ln\!\left(\frac{x_E(\tau; x_{\mathrm{in}})}{x_{\mathrm{in}}}\right)
+\end{equation}
+$$
+
+Over one full period, the logarithmic gain can be found to be
+
+$$
+\begin{align}
+    \Delta \ln \!y &= \int_0^{pT} \left(x_A(t;\,x_B^\star) - \gamma_A \right) dt + \int_0^{(1-p)T} \left(x_B(t;\,x_A^\star) - \gamma_B \right) dt \\
+    &= \left[K_ApT - \frac{K_A}{r_A}\ln\!\left(\frac{x_A^\star}{x_B^\star}\right) - \gamma_ApT \right] + \left[K_B(1-p)T - \frac{K_B}{r_B}\ln\!\left(\frac{x_B^\star}{x_A^\star}\right) - \gamma_B(1-p)T \right] \\
+    &= \left[(K_A - \gamma_A)p + (K_B-\gamma_B)(1-p) \right]T - \frac{K_A}{r_A}\ln\!\left(\frac{x_A^\star}{x_B^\star}\right) - \frac{K_B}{r_B}\ln\!\left(\frac{x_B^\star}{x_A^\star}\right) \\
+    \frac{\Delta\ln\!y}{T} &= (K_A - \gamma_A)p + (K_B-\gamma_B)(1-p)  - \frac{1}{T} \left[\frac{K_A}{r_A}\ln\!\left(\frac{x_A^\star}{x_B^\star}\right) + \frac{K_B}{r_B}\ln\!\left(\frac{x_B^\star}{x_A^\star}\right) \right]
+\end{align}
+$$
+
+As $\Delta\ln \!y/T$ equals the invasion exponent $\lambda(T,p)$, and the critical switching time $T_c$ is defined where $\lambda(T_c, p)=0$, we have the transcendental equation
+
+$$
+\begin{equation}
+    (K_A - \gamma_A)p + (K_B-\gamma_B)(1-p) =  \frac{1}{T_c(p)} \left[\frac{K_A}{r_A}\ln\!\left(\frac{x_A^\star}{x_B^\star}\right) + \frac{K_B}{r_B}\ln\!\left(\frac{x_B^\star}{x_A^\star}\right) \right]
+\end{equation}
+$$
+
+where $x_A^\star$ and $x_B^\star$ are dependent on $T_c(p)$ and $p$ via \autoref{eq:tc-popt-cyclic-xa*-xb*-lc} (with $T\to T_c$).
+
+
+
