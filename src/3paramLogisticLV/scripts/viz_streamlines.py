@@ -8,8 +8,8 @@ from pathlib import Path
 
 def env_params():
     return {
-        'A': {'r': 1.0, 'K': 1.0, 'gamma': 1.0},
-        'B': {'r': 4.0, 'K': 2.0, 'gamma': 2.2},
+        'A': {'r': 1.0, 'K': 1.0, 'gamma': 1.1},
+        'B': {'r': 4.0, 'K': 2.0, 'gamma': 2.1},
     }
 
 def vector_field(x, y, env):
@@ -117,14 +117,12 @@ def plot_phase_portrait(params=None, outdir=None):
     C_FP_STABLE   = '#1a1a1a'   # filled: near-black
     C_FP_UNSTABLE = 'white'     # open circle
 
-    # ── Layout: smaller figure so 20pt fonts appear large ────────────────────
+    # ── Layout: three panels, no colorbar ────────────────────────────────────
     fig = plt.figure(figsize=(14, 4.6))
     fig.patch.set_facecolor('none')
-    gs = GridSpec(1, 4, width_ratios=[1, 1, 1, 0.06],
-                  wspace=0.42, left=0.08, right=0.97,
-                  top=0.90, bottom=0.18)
+    gs = GridSpec(1, 3, wspace=0.42, left=0.07, right=0.98,
+                  top=0.91, bottom=0.16)
     axes = [fig.add_subplot(gs[0, i]) for i in range(3)]
-    cax  = fig.add_subplot(gs[0, 3])
 
     panels = [
         dict(ax=axes[0], U=UA,  V=VA,  sp=spA,  fps=fps_A,
@@ -180,13 +178,6 @@ def plot_phase_portrait(params=None, outdir=None):
         ax.set_ylim(y_lo, y_hi)
         ax.grid(False)
         ax.patch.set_facecolor('none')
-
-    # ── Colorbar ──────────────────────────────────────────────────────────────
-    sm = plt.cm.ScalarMappable(cmap=STREAM_CMAP, norm=norm)
-    sm.set_array([])
-    cb = fig.colorbar(sm, cax=cax)
-    cb.set_label(r'Speed  $|\dot{\mathbf{x}}|$', fontsize=16, labelpad=6)
-    cax.tick_params(labelsize=13)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     outdir = Path(outdir)

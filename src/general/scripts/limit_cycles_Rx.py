@@ -1,11 +1,14 @@
 """
 Three-panel phase-portrait figure demonstrating R(x) theory.
-Base LV: r1=K1=g1=1, r2=4, K2=2.
+Base LV: r1=K1=1, g1=1.1, r2=4, K2=2.
 
-Three panels for gamma2 = 2.2, 2.5, 3.0.
-Plotting order: blues T=4..0.5, then reds T=4..0.5 (large T underneath).
-Extinct attractors shown as lines at y=0.
+Three panels for three gamma2 values straddling the rescue threshold
+(gamma2* ≈ 2.31). Plotting order: blues T=4..0.5, then reds T=4..0.5
+(large T underneath). Extinct attractors shown as lines at y=0.
 Shared y-scale derived from simulated data. Constrained layout.
+
+Geometry/fontsizes match critical_threshold_Rx.py so the two figures stack
+cleanly at the same \\linewidth.
 """
 from __future__ import annotations
 import numpy as np
@@ -16,9 +19,16 @@ from matplotlib.lines import Line2D
 import os
 
 # ── Parameters ────────────────────────────────────────────────────────────────
-r1, K1, g1 = 1.0, 1.0, 1.0
+r1, K1, g1 = 1.0, 1.0, 1.1
 r2, K2     = 4.0, 2.0
 T_VALUES   = [0.5, 1.0, 2.0, 4.0]   # index 0=T=0.5, index 3=T=4
+
+# Canonical figure geometry (shared with critical_threshold_Rx.py)
+FIGSIZE   = (21, 5.6)
+FS_TITLE  = 20
+FS_LABEL  = 20
+FS_TICK   = 15
+FS_LEGEND = 15
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 # Steel blues anchored at #547AA5, lightening for smaller T
@@ -26,9 +36,24 @@ BLUES = ['#b8cfe0', '#7aa3c0', '#547AA5', '#2d4f73']
 # Deep crimsons anchored at #901A1E, lightening for smaller T
 REDS  = ['#d9888a', '#b84042', '#901A1E', '#5a0f11']
 
-# R(x)>0 shading: golden amber from #CBA810, very light fill
-SHADE_FC = '#f5e6a3'   # pale amber fill
-SHADE_EC = '#CBA810'   # amber boundary line
+# R(x)>0 shading: golden amber (lightened), very light fill
+SHADE_FC = '#faefc4'   # pale amber fill (lightened)
+SHADE_EC = '#E0C233'   # amber boundary line (lightened)
+
+# ── R(x) and its positive interval ──────────────────────────────────────────────
+def R_base(x, g2):
+    f1 = r1 * x * (1 - x / K1)
+    f2 = r2 * x * (1 - x / K2)
+    return (x - g2) / f2 - (x - g1) / f1
+
+def Rpos_interval(g2):
+    """Interval within (K1, K2) where R(x)>0 (now interior, since g1 != K1).
+    Returns (x_lo, x_hi) or None if R<=0 everywhere."""
+    xs = np.linspace(K1 + 1e-6, K2 - 1e-6, 40000)
+    pos = xs[R_base(xs, g2) > 0]
+    if len(pos) == 0:
+        return None
+    return pos.min(), pos.max()
 
 # ── ODE ───────────────────────────────────────────────────────────────────────
 def rhs(x, y, env, g2):
@@ -61,19 +86,20 @@ def simulate_attractor(T, p, g2, transient=3000., measure_periods=14, dt=None):
     return xs, ys, ys.max() > 1e-4
 
 # ── Single panel ──────────────────────────────────────────────────────────────
-def plot_panel(ax, g2, label, show_ylabel, data, y_hi):
+def plot_panel(ax, g2, label, show_ylabel, data, y_hi, show_legend=False):
     """data: dict keyed (T, p) -> (xs, ys, persists)"""
-    R_zero = 4.0 - g2
-
     all_xs = [K1, K2]
 
-    # ── R(x)>0 shading ────────────────────────────────────────────────────────
-    if R_zero > K1 + 0.01:
-        ax.axvspan(K1, R_zero, color=SHADE_FC, alpha=0.85, zorder=0, linewidth=0)
-        ax.axvline(R_zero, color=SHADE_EC, lw=1.6, ls=(0, (5, 3)), zorder=2)
+    # ── R(x)>0 shading (interior interval) ──────────────────────────────────────
+    interval = Rpos_interval(g2)
+    if interval is not None:
+        xs_lo, xs_hi = interval
+        ax.axvspan(xs_lo, xs_hi, color=SHADE_FC, alpha=0.85, zorder=0, linewidth=0)
+        ax.axvline(xs_lo, color=SHADE_EC, lw=1.6, ls=(0, (5, 3)), zorder=2)
+        ax.axvline(xs_hi, color=SHADE_EC, lw=1.6, ls=(0, (5, 3)), zorder=2)
 
     # ── Draw order: blues T=4..0.5, then reds T=4..0.5 ──────────────────────
-    for p, colors in [(0.5, BLUES), (0.9, REDS)]:
+    for p, colors in [(0.5, BLUES), (0.7, REDS)]:
         for k, T in reversed(list(enumerate(T_VALUES))):
             xs, ys, pers = data[(T, p)]
             col = colors[k]
@@ -98,25 +124,31 @@ def plot_panel(ax, g2, label, show_ylabel, data, y_hi):
     ax.set_ylim(-0.004, y_hi)
 
     # ── Axes decoration ───────────────────────────────────────────────────────
-    ax.set_title(label, fontsize=20, pad=10, fontweight='normal')
-    ax.set_xlabel('Prey  $x$', fontsize=20, labelpad=8)
+    ax.set_title(label, fontsize=FS_TITLE, pad=10, fontweight='normal')
+    ax.set_xlabel('Prey  $x$', fontsize=FS_LABEL, labelpad=8)
     if show_ylabel:
-        ax.set_ylabel('Predator  $y$', fontsize=20, labelpad=8)
+        ax.set_ylabel('Predator  $y$', fontsize=FS_LABEL, labelpad=8)
     ax.spines[['top', 'right']].set_visible(False)
-    ax.tick_params(labelsize=18)
+    ax.tick_params(labelsize=FS_TICK)
 
-# ── Legend handles (two rows: blues, reds; T=4..0.5 in each) ─────────────────
+    if show_legend:
+        ax.legend(handles=make_legend_handles(), loc='upper right',
+                  ncol=2, frameon=True, framealpha=0.95, edgecolor='#dddddd',
+                  fontsize=FS_LEGEND, handlelength=1.8, columnspacing=1.0,
+                  handletextpad=0.5, labelspacing=0.3)
+
+# ── Legend handles (two columns: blues, reds; T=4..0.5 in each) ──────────────
 def make_legend_handles():
-    # Blues top row: T=4 (dark, index 3) .. T=0.5 (light, index 0), left to right
+    # Blues column: T=4 (dark, index 3) .. T=0.5 (light, index 0)
     blue_handles = [
         Line2D([0],[0], color=BLUES[k], lw=2.5,
                label=rf'$T={T},\ p=0.5$')
         for k, T in reversed(list(enumerate(T_VALUES)))
     ]
-    # Reds bottom row: same T order
+    # Reds column: same T order
     red_handles = [
         Line2D([0],[0], color=REDS[k], lw=2.5,
-               label=rf'$T={T},\ p=0.9$')
+               label=rf'$T={T},\ p=0.7$')
         for k, T in reversed(list(enumerate(T_VALUES)))
     ]
     interleaved_handles = []
@@ -131,7 +163,7 @@ def main(outpath='src/general/plots/phase_space/base_LV.pdf'):
     matplotlib.rcParams.update({
         'font.family':       'sans-serif',
         'font.sans-serif':   ['Helvetica', 'Arial', 'DejaVu Sans'],
-        'font.size':         20,
+        'font.size':         18,
         'axes.linewidth':    1.2,
         'xtick.major.width': 1.1,
         'ytick.major.width': 1.1,
@@ -139,7 +171,7 @@ def main(outpath='src/general/plots/phase_space/base_LV.pdf'):
         'ytick.major.size':  5,
     })
 
-    G2_VALUES = [2.2, 2.5, 3.0]
+    G2_VALUES = [2.1, 2.25, 2.4]
 
     # ── Simulate everything once, store in nested dict ────────────────────────
     print("Simulating all limit cycles...")
@@ -148,7 +180,7 @@ def main(outpath='src/general/plots/phase_space/base_LV.pdf'):
     for g2 in G2_VALUES:
         all_data[g2] = {}
         for T in T_VALUES:
-            for p in [0.5, 0.9]:
+            for p in [0.5, 0.7]:
                 xs, ys, pers = simulate_attractor(T, p, g2)
                 all_data[g2][(T, p)] = (xs, ys, pers)
                 if pers:
@@ -161,26 +193,17 @@ def main(outpath='src/general/plots/phase_space/base_LV.pdf'):
     print(f"Shared y_hi = {y_hi:.4f}")
 
     # ── Plot ──────────────────────────────────────────────────────────────────
-    fig, axes = plt.subplots(1, 3, figsize=(15, 6), layout='constrained')
+    fig, axes = plt.subplots(1, 3, figsize=FIGSIZE, layout='constrained')
     fig.patch.set_facecolor('white')
 
     configs = [
-        (2.2, r'(a)  $\gamma_2=2.2$'),
-        (2.5, r'(b)  $\gamma_2=2.5$'),
-        (3.0, r'(c)  $\gamma_2=3.0$'),
+        (G2_VALUES[0], rf'(a)  $\gamma_2={G2_VALUES[0]}$'),
+        (G2_VALUES[1], rf'(b)  $\gamma_2={G2_VALUES[1]}$'),
+        (G2_VALUES[2], rf'(c)  $\gamma_2={G2_VALUES[2]}$'),
     ]
-    for ax, (g2, label), show_y in zip(axes, configs, [True, False, False]):
+    for i, (ax, (g2, label), show_y) in enumerate(zip(axes, configs, [True, False, False])):
         plot_panel(ax, g2=g2, label=label, show_ylabel=show_y,
-                   data=all_data[g2], y_hi=y_hi)
-
-    handles = make_legend_handles()
-    fig.legend(handles=handles,
-               loc='outside lower center',
-               ncol=4,
-               frameon=True, framealpha=0.95, edgecolor='#dddddd',
-               fontsize=20, handlelength=2.4, columnspacing=1.6,
-               handletextpad=0.6)
-
+                   data=all_data[g2], y_hi=y_hi, show_legend=(i == 2))
 
     fig.savefig(outpath, dpi=300, facecolor='white', edgecolor='none')
     fig.savefig(outpath.replace('.pdf', '.svg'), dpi=300, facecolor='none', edgecolor='none')

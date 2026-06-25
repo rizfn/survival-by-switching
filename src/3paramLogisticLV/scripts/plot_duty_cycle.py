@@ -9,14 +9,35 @@ Panel 2 — λ(T, p):      invasion exponent family + analytical T→0 limit.
 Panel 3 — T_c(p):       critical switching period.
 
 Parameters:
-  Env A: r=1, K=1, γ=1
-  Env B: r=4, K=2, γ=2.2
+  Env A: r=1, K=1, γ=1.1
+  Env B: r=4, K=2, γ=2.1
 """
 from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 from scipy.optimize import brentq
 import os
+
+
+def label_ends_only(ax):
+    """Keep every default tick mark, but only write the tick label for the
+    smallest and largest tick that falls within the current view limits.
+    (e.g. ticks [0,1,2,3,4,5] with the view ending at 5.5 -> only 0 and 5 are
+    labelled.) Done with a draw-time formatter so it tracks the auto ticks,
+    rather than rounding the data range by hand."""
+    def make_fmt(get_ticks, get_lim):
+        def fmt(v, pos):
+            lo, hi = sorted(get_lim())
+            inview = [t for t in get_ticks() if lo - 1e-9 <= t <= hi + 1e-9]
+            if not inview:
+                return ''
+            if abs(v - min(inview)) < 1e-9 or abs(v - max(inview)) < 1e-9:
+                return f'{v:g}'
+            return ''
+        return fmt
+    ax.xaxis.set_major_formatter(FuncFormatter(make_fmt(ax.get_xticks, ax.get_xlim)))
+    ax.yaxis.set_major_formatter(FuncFormatter(make_fmt(ax.get_yticks, ax.get_ylim)))
 
 
 def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
@@ -33,8 +54,10 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     # ── Panel 1: y_max via batched vectorised RK4 ─────────────────────────────
 
     def y_star(p):
-        """Fast-switching (T→0) predator steady state."""
-        return r_bar(p) - c_bar(p) * g_bar(p)
+        """Fast-switching (T→0) predator steady state.
+        The analytical expression can go negative, which is unphysical
+        (the predator is extinct), so we cap it at 0."""
+        return max(r_bar(p) - c_bar(p) * g_bar(p), 0.0)
 
     def p_opt_ystar():
         """Analytical p that maximises y*(p)."""
@@ -202,8 +225,8 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     # ── Plot ──────────────────────────────────────────────────────────────────
 
     plt.rcParams.update({
-        'font.size': 22, 'axes.labelsize': 22,
-        'xtick.labelsize': 18, 'ytick.labelsize': 18, 'legend.fontsize': 16,
+        'font.size': 24, 'axes.labelsize': 24,
+        'xtick.labelsize': 20, 'ytick.labelsize': 20, 'legend.fontsize': 18,
     })
 
     fig, axes = plt.subplots(1, 3, figsize=(20, 6), layout='constrained')
@@ -234,8 +257,8 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
         y_at1 = np.interp(p_opt1, p_arr, ymax_fast)
         mark_opt(ax, p_opt1, y_at1, fr'$p_{{\rm opt}} \approx {p_opt1:.3f}$')
 
-    ax.set_xlabel('Duty cycle $p$')
-    ax.set_ylabel(r'Peak predator $y_{\max}$ on limit cycle')
+    ax.set_xlabel('Duty cycle $p$', labelpad=-18)
+    ax.set_ylabel(r'Peak predator $y_{\max}$', labelpad=-28)
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
@@ -256,8 +279,8 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
         lam_at = np.interp(p_opt2, p_arr, lam_fast)
         mark_opt(ax, p_opt2, lam_at, fr'$p_{{\rm opt}}^\lambda \approx {p_opt2:.3f}$')
 
-    ax.set_xlabel('Duty cycle $p$')
-    ax.set_ylabel(r'Invasion exponent $\lambda$')
+    ax.set_xlabel('Duty cycle $p$', labelpad=-18)
+    ax.set_ylabel(r'Invasion exponent $\lambda$', labelpad=-36)
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
@@ -270,13 +293,16 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     if np.isfinite(p_opt3):
         mark_opt(ax, p_opt3, tc_opt3, fr'$p_{{\rm opt}}^{{T_c}} \approx {p_opt3:.3f}$')
 
-    ax.set_xlabel('Duty cycle $p$')
-    ax.set_ylabel(r'Critical period $T_c$')
+    ax.set_xlabel('Duty cycle $p$', labelpad=-18)
+    ax.set_ylabel(r'Critical period $T_c$', labelpad=-12)
     ax.set_xlim(0, 1)
-    ax.set_yscale('log')
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
     ax.legend(frameon=False, loc='best')
+
+    # ── Keep all ticks, but label only the extreme ticks on every axis ──────────
+    for ax in axes:
+        label_ends_only(ax)
 
     # ── Save ──────────────────────────────────────────────────────────────────
     outdir = 'src/3paramLogisticLV/plots/duty_cycle'
@@ -289,7 +315,7 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
 
 if __name__ == "__main__":
     rA, KA, gA = 1.0, 1.0, 1.1
-    rB, KB, gB = 4.0, 2.0, 2.2
+    rB, KB, gB = 4.0, 2.0, 2.1
     T_FAMILY   = [0.5, 1.0, 2.0, 4.0, 10.0, 20.0]
-    N_P        = 250
+    N_P        = 500
     main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P)
