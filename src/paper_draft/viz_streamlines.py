@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap
 from pathlib import Path
 
 
@@ -94,36 +95,42 @@ def integrate_switching(x0, y0, T, n_periods, envA, envB, steps_per_period=400):
     return np.array(xs), np.array(ys)
 
 
-def plot_trajectory(ax, xs, ys, x_lo, x_hi, y_lo, y_hi, title,
-                    interior_fp=None, show_ylabel=True, cmap='inferno'):
-    """Plot a phase-plane trajectory coloured by progression in time.
+def _fade_cmap(light, dark):
+    """Colormap fading from a light (transient) to a dark (final) shade."""
+    return LinearSegmentedColormap.from_list('fade', [light, dark])
 
-    Early times are dark, late times bright (yellow in 'inferno').  Because
-    later segments are drawn on top, the region the trajectory keeps re-tracing
-    — the attractor — is overwritten in bright yellow: a positive-y limit cycle
-    when the population survives, or the extinction axis y = 0 when it dies.
+
+def plot_switching_pair(ax, trajs, x_lo, x_hi, y_lo, y_hi):
+    """Plot several switching trajectories on one phase plane.
+
+    Each trajectory is coloured by progression in time, fading from a light
+    (transient) shade to a dark (final-state) shade.  Slow switching collapses
+    onto the extinction axis y = 0 (dead); fast switching settles onto a
+    positive-y limit cycle (alive).
     """
-    pts = np.column_stack([xs, ys]).reshape(-1, 1, 2)
-    segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
-    t = np.linspace(0.0, 1.0, len(segs))
-    lc = LineCollection(segs, cmap=cmap, norm=plt.Normalize(0, 1),
-                        linewidth=1.7, zorder=3)
-    lc.set_array(t)
-    ax.add_collection(lc)
+    for tr in trajs:
+        xs, ys = tr['xs'], tr['ys']
+        pts = np.column_stack([xs, ys]).reshape(-1, 1, 2)
+        segs = np.concatenate([pts[:-1], pts[1:]], axis=1)
+        t = np.linspace(0.0, 1.0, len(segs))
+        lc = LineCollection(segs, cmap=tr['cmap'], norm=plt.Normalize(0, 1),
+                            linewidth=1.9, zorder=3)
+        lc.set_array(t)
+        ax.add_collection(lc)
 
-    # start marker
-    ax.plot(xs[0], ys[0], 'o', color='#1a1a1a', markersize=8,
+    # shared start marker (all trajectories use the same initial condition)
+    x0, y0 = trajs[0]['xs'][0], trajs[0]['ys'][0]
+    ax.plot(x0, y0, 'o', color='#1a1a1a', markersize=8,
             markerfacecolor='white', markeredgewidth=1.7, zorder=6)
 
-    # averaged interior fixed point (fast-switching attractor) for reference
-    if interior_fp is not None:
-        ax.plot(*interior_fp, marker='*', color='#1a1a1a',
-                markersize=16, zorder=5, linestyle='none')
+    # annotate each trajectory near its final state, in its own dark shade
+    for tr in trajs:
+        ax.text(*tr['label_xy'], tr['label'], transform=ax.transAxes,
+                color=tr['label_color'], ha=tr['label_ha'], va=tr['label_va'],
+                fontsize=18, zorder=7)
 
-    ax.set_title(title, pad=7)
     ax.set_xlabel('Prey  $x$', labelpad=4)
-    if show_ylabel:
-        ax.set_ylabel('Predator  $y$', labelpad=4)
+    ax.set_ylabel('Predator  $y$', labelpad=4)
     ax.set_xlim(x_lo, x_hi)
     ax.set_ylim(y_lo, y_hi)
     ax.grid(False)
@@ -134,8 +141,8 @@ def plot_trajectory(ax, xs, ys, x_lo, x_hi, y_lo, y_hi, title,
 
 def plot_phase_portrait(params=None, outdir=None,
                         alpha_fast=2.0, alpha_slow=0.2,
-                        x0=1.0, y0=0.05,
-                        n_periods_fast=25, n_periods_slow=12):
+                        x0=0.2, y0=0.05,
+                        n_periods_fast=40, n_periods_slow=14):
     if params is None:
         params = env_params()
 
@@ -162,9 +169,6 @@ def plot_phase_portrait(params=None, outdir=None,
     fps_A   = find_fixed_points(envA)
     fps_B   = find_fixed_points(envB)
     fps_avg = averaged_fixed_points(envA, envB)
-
-    # interior coexistence fixed point of the averaged field (if it exists)
-    interior_fp = next(((fx, fy) for (fx, fy) in fps_avg if fy > 1e-9), None)
 
     # ── Axis limits ───────────────────────────────────────────────────────────
     all_y      = [fy for (_, fy) in fps_A + fps_B + fps_avg]
@@ -203,38 +207,49 @@ def plot_phase_portrait(params=None, outdir=None,
     xs_slow, ys_slow = integrate_switching(x0, y0, period_slow, n_periods_slow,
                                            envA, envB, steps_per_period)
 
-    # trajectory panels get a tighter ceiling: the dynamics (start, limit cycle,
-    # decay to extinction) all live in a low band, so zoom in on it.
+    # the switching panel gets its own (tighter) ceiling: the dynamics — start,
+    # limit cycle, decay to extinction — all live in a low band, so zoom in on
+    # it.  This panel does NOT share the y-axis with the streamline panels.
+    y_lo_traj = -0.004
     y_hi_traj = max(ys_fast.max(), ys_slow.max(), y0) * 1.18
 
     # ── Style ─────────────────────────────────────────────────────────────────
     STREAM_CMAP = 'plasma'   # dark-purple → magenta → bright orange; no harsh yellow
     C_FP_STABLE = '#1a1a1a'
 
-    # ── Layout:  A  B  /  C  /  D  E  ─────────────────────────────────────────
-    #   3 rows × 4 cols; centre panel C spans the middle two columns so it sits
-    #   centred with the same width as the other panels.
-    fig = plt.figure(figsize=(11, 13.5))
+    # fast switching → red (light transient → dark final limit cycle)
+    # slow switching → blue (light transient → dark final dead state)
+    CMAP_FAST = _fade_cmap('#f5a3a3', '#8b0000')
+    CMAP_SLOW = _fade_cmap('#9ecae1', '#08306b')
+    C_FAST_DARK = '#8b0000'
+    C_SLOW_DARK = '#08306b'
+
+    # ── Layout:  2 × 2  ─────────────────────────────────────────────────────────
+    #   Env1   Env2
+    #   Avg    Switching
+    fig = plt.figure(figsize=(11, 9.6))
     fig.patch.set_facecolor('none')
-    gs = GridSpec(3, 4, figure=fig,
-                  wspace=0.55, hspace=0.42,
-                  left=0.10, right=0.97, top=0.95, bottom=0.06)
+    gs = GridSpec(2, 2, figure=fig,
+                  wspace=0.08, hspace=0.10,
+                  left=0.10, right=0.97, top=0.95, bottom=0.09)
 
-    axA = fig.add_subplot(gs[0, 0:2])
-    axB = fig.add_subplot(gs[0, 2:4])
-    axC = fig.add_subplot(gs[1, 1:3])
-    axD = fig.add_subplot(gs[2, 0:2])
-    axE = fig.add_subplot(gs[2, 2:4])
+    axA = fig.add_subplot(gs[0, 0])   # Environment 1
+    axB = fig.add_subplot(gs[0, 1])   # Environment 2
+    axC = fig.add_subplot(gs[1, 0])   # Time-averaged field
+    axS = fig.add_subplot(gs[1, 1])   # Switching trajectories
 
+    # the three streamline panels share x and y axes; only the bottom-left panel
+    # (axC) carries the x-label/ticks, only the left column carries y-label/ticks.
     panels = [
         dict(ax=axA, U=UA,  V=VA,  sp=spA,  fps=fps_A,
-             title='Environment 1', show_ylabel=True,
+             title='Environment 1', show_ylabel=True, show_xlabel=False,
              jac_fn=lambda x, y: jacobian(envA, x, y)),
         dict(ax=axB, U=UB,  V=VB,  sp=spB,  fps=fps_B,
-             title='Environment 2', show_ylabel=False,
+             title='Environment 2', show_ylabel=False, show_xlabel=False,
              jac_fn=lambda x, y: jacobian(envB, x, y)),
         dict(ax=axC, U=Uav, V=Vav, sp=spAv, fps=fps_avg,
-             title='Time-averaged field ($\\alpha\\to\\infty$)', show_ylabel=True,
+             title='Time-averaged field ($\\alpha\\to\\infty$)',
+             show_ylabel=True, show_xlabel=True,
              jac_fn=lambda x, y: averaged_jacobian(envA, envB, x, y)),
     ]
 
@@ -252,37 +267,34 @@ def plot_phase_portrait(params=None, outdir=None,
                         markeredgecolor=C_FP_STABLE, markeredgewidth=1.6,
                         markersize=12, zorder=5)
         ax.set_title(p['title'], pad=7)
-        ax.set_xlabel('Prey  $x$', labelpad=4)
-        if p['show_ylabel']:
-            ax.set_ylabel('Predator  $y$', labelpad=4)
         ax.set_xlim(x_lo, x_hi)
         ax.set_ylim(y_lo, y_hi)
+        if p['show_xlabel']:
+            ax.set_xlabel('Prey  $x$', labelpad=4)
+        else:
+            ax.tick_params(labelbottom=False)
+        if p['show_ylabel']:
+            ax.set_ylabel('Predator  $y$', labelpad=4)
+        else:
+            ax.tick_params(labelleft=False)
         ax.grid(False)
         ax.patch.set_facecolor('none')
 
-    # ── Trajectory panels D (fast → limit cycle) and E (slow → extinction) ──────
-    plot_trajectory(axD, xs_fast, ys_fast, x_lo, x_hi, y_lo, y_hi_traj,
-                    rf'Fast switching ($\alpha={alpha_fast:g}$)',
-                    interior_fp=None, show_ylabel=True, cmap='inferno')
-    plot_trajectory(axE, xs_slow, ys_slow, x_lo, x_hi, y_lo, y_hi_traj,
-                    rf'Slow switching ($\alpha={alpha_slow:g}$)',
-                    interior_fp=None, show_ylabel=False, cmap='inferno')
-
-    # ── Colorbar for the streamline speed, placed to the right of C ─────────────
-    #   positioned from C's own bbox so C stays centred and full-width.
-    sm = plt.cm.ScalarMappable(cmap=STREAM_CMAP, norm=norm)
-    sm.set_array([])
-    posC = axC.get_position()
-    cax = fig.add_axes([posC.x1 + 0.020, posC.y0, 0.018, posC.height])
-    cb = fig.colorbar(sm, cax=cax)
-    cb.set_label(r'Speed', labelpad=8)
-    cax.patch.set_facecolor('none')
-
-    # # ── Panel letters ───────────────────────────────────────────────────────────
-    # for ax, letter in [(axA, 'A'), (axB, 'B'), (axC, 'C'),
-    #                    (axD, 'D'), (axE, 'E')]:
-    #     ax.text(-0.18, 1.04, letter, transform=ax.transAxes,
-    #             fontsize=24, fontweight='bold', va='bottom', ha='right')
+    # ── Switching panel: fast (red, survives) + slow (blue, dies) combined ──────
+    trajs = [
+        dict(xs=xs_fast, ys=ys_fast, cmap=CMAP_FAST,
+             label=rf'$\alpha={alpha_fast:g}$', label_color=C_FAST_DARK,
+             label_xy=(0.97, 0.93), label_ha='right', label_va='top'),
+        dict(xs=xs_slow, ys=ys_slow, cmap=CMAP_SLOW,
+             label=rf'$\alpha={alpha_slow:g}$', label_color=C_SLOW_DARK,
+             label_xy=(0.97, 0.10), label_ha='right', label_va='bottom'),
+    ]
+    plot_switching_pair(axS, trajs, x_lo, x_hi, y_lo_traj, y_hi_traj)
+    axS.set_title('Switching speed', pad=7)
+    # independent y-axis (not shared with the streamline panels): put its ticks
+    # and label on the outer right edge so the shared top row can stay tight.
+    axS.yaxis.set_label_position('right')
+    axS.yaxis.tick_right()
 
     # ── Save ──────────────────────────────────────────────────────────────────
     outdir = Path(outdir)

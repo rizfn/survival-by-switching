@@ -334,7 +334,7 @@ def compute_curves(params, alphas_dense, alphas_sim,
 # ── Plot ────────────────────────────────────────────────────────────────────
 
 def plot(params=None, outdir=None, n_dense=100, n_sim=22,
-         alpha_min=0.05, alpha_max=25.0,
+         alpha_min=0.05, alpha_max=100.0,
          n_runs_lam=32, T_meas_lam=2000.0, n_runs_y=48, T_meas_y=2000.0):
     if params is None:
         params = env_params()
@@ -375,15 +375,23 @@ def plot(params=None, outdir=None, n_dense=100, n_sim=22,
     C_STO = '#c0392b'   # stochastic    — brick red
     C_REF = '#9aa0a6'   # asymptote guides
 
-    fig = plt.figure(figsize=(12, 5.2))
-    gs = GridSpec(1, 2, figure=fig, wspace=0.30,
-                  left=0.09, right=0.985, top=0.95, bottom=0.17)
+    # ── Two wide panels, stacked and sharing the x-axis ───────────────────────
+    fig = plt.figure(figsize=(10, 9))
+    gs = GridSpec(2, 1, figure=fig, hspace=0.10,
+                  left=0.11, right=0.97, top=0.97, bottom=0.10)
     axY = fig.add_subplot(gs[0, 0])
-    axL = fig.add_subplot(gs[0, 1])
+    axL = fig.add_subplot(gs[1, 0], sharex=axY)
 
     def crit_lines(ax):
+        """Vertical critical-rate guides (labelled only on the lower panel)."""
         ax.axvline(ac_det, color=C_DET, lw=1.0, ls=':', zorder=0)
         ax.axvline(ac_sto, color=C_STO, lw=1.0, ls=':', zorder=0)
+
+    # consistent whitespace above the fast-limit line in both panels: leave the
+    # same fraction GAP of the axis height between that line and the top spine.
+    GAP = 0.15
+    def top_lim(fast, bottom):
+        return (fast - GAP * bottom) / (1.0 - GAP)
 
     # ── y* panel — both curves from simulation ────────────────────────────────
     axY.axhline(y_fast, color=C_REF, lw=1.2, ls='--', zorder=0)
@@ -395,9 +403,10 @@ def plot(params=None, outdir=None, n_dense=100, n_sim=22,
     axY.plot(alphas_dense, d['y_sto'], '-', color=C_STO, lw=2.2,
              label='Stochastic')
     axY.set_xscale('log')
-    axY.set_xlabel(r'Switching rate  $\alpha$')
-    axY.set_ylabel(r'Mean predator density  $y^\star$')
-    axY.set_ylim(-0.004, y_fast * 1.18)
+    axY.set_ylabel(r'$y^\star$')
+    y_bot = -0.004
+    axY.set_ylim(y_bot, top_lim(y_fast, y_bot))
+    axY.tick_params(labelbottom=False)          # x-axis shared with panel below
     axY.legend(frameon=False, loc='upper left')
 
     # ── lambda panel — theory lines + simulation dots ─────────────────────────
@@ -409,6 +418,12 @@ def plot(params=None, outdir=None, n_dense=100, n_sim=22,
     axL.text(alpha_min, lam_slow, r' slow limit', color=C_REF,
              va='bottom', ha='left', fontsize=15)
     crit_lines(axL)
+    # critical-rate labels: only here, upright, just right of each line and at
+    # the same height as the "slow limit" text.
+    axL.text(ac_det, lam_slow, r' $\alpha_x^\mathrm{det}$', color=C_DET,
+             va='bottom', ha='left', fontsize=15)
+    axL.text(ac_sto, lam_slow, r' $\alpha_x^\mathrm{stoch}$', color=C_STO,
+             va='bottom', ha='left', fontsize=15)
     axL.plot(alphas_dense, d['lam_det_th'], '-', color=C_DET, lw=2.6,
              label='Deterministic')
     axL.plot(alphas_dense, d['lam_sto_th'], '-', color=C_STO, lw=2.2,
@@ -419,7 +434,9 @@ def plot(params=None, outdir=None, n_dense=100, n_sim=22,
              markerfacecolor='white', markeredgewidth=1.6)
     axL.set_xscale('log')
     axL.set_xlabel(r'Switching rate  $\alpha$')
-    axL.set_ylabel(r'Invasion exponent  $\lambda$')
+    axL.set_ylabel(r'$\lambda$')
+    lam_bot = lam_slow - 0.012
+    axL.set_ylim(lam_bot, top_lim(lam_fast, lam_bot))
     axL.legend(frameon=False, loc='upper left')
 
     # ── Save ──────────────────────────────────────────────────────────────────
