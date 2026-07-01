@@ -224,32 +224,36 @@ def plot_phase_portrait(params=None, outdir=None,
     C_FAST_DARK = '#8b0000'
     C_SLOW_DARK = '#08306b'
 
-    # ── Layout:  2 × 2  ─────────────────────────────────────────────────────────
-    #   Env1   Env2
-    #   Avg    Switching
-    fig = plt.figure(figsize=(11, 9.6))
+    # ── Layout:  4 × 1  (single stacked column) ─────────────────────────────────
+    #   Env1
+    #   Env2
+    #   Avg
+    #   Switching
+    # Each panel is taller than it is wide (portrait aspect).
+    fig = plt.figure(figsize=(6.0, 12.0))
     fig.patch.set_facecolor('none')
-    gs = GridSpec(2, 2, figure=fig,
-                  wspace=0.08, hspace=0.10,
-                  left=0.10, right=0.97, top=0.95, bottom=0.09)
+    gs = GridSpec(4, 1, figure=fig,
+                  hspace=0.32,
+                  left=0.19, right=0.94, top=0.975, bottom=0.045)
 
     axA = fig.add_subplot(gs[0, 0])   # Environment 1
-    axB = fig.add_subplot(gs[0, 1])   # Environment 2
-    axC = fig.add_subplot(gs[1, 0])   # Time-averaged field
-    axS = fig.add_subplot(gs[1, 1])   # Switching trajectories
+    axB = fig.add_subplot(gs[1, 0])   # Environment 2
+    axC = fig.add_subplot(gs[2, 0])   # Time-averaged field
+    axS = fig.add_subplot(gs[3, 0])   # Switching trajectories
 
-    # the three streamline panels share x and y axes; only the bottom-left panel
-    # (axC) carries the x-label/ticks, only the left column carries y-label/ticks.
+    # In a single column, every panel carries the y-label/ticks.  Only the
+    # bottom-most panel (axS) carries the x-label/ticks, since the three
+    # streamline panels share the same x-range.
     panels = [
         dict(ax=axA, U=UA,  V=VA,  sp=spA,  fps=fps_A,
              title='Environment 1', show_ylabel=True, show_xlabel=False,
              jac_fn=lambda x, y: jacobian(envA, x, y)),
         dict(ax=axB, U=UB,  V=VB,  sp=spB,  fps=fps_B,
-             title='Environment 2', show_ylabel=False, show_xlabel=False,
+             title='Environment 2', show_ylabel=True, show_xlabel=False,
              jac_fn=lambda x, y: jacobian(envB, x, y)),
         dict(ax=axC, U=Uav, V=Vav, sp=spAv, fps=fps_avg,
              title='Time-averaged field ($\\alpha\\to\\infty$)',
-             show_ylabel=True, show_xlabel=True,
+             show_ylabel=True, show_xlabel=False,
              jac_fn=lambda x, y: averaged_jacobian(envA, envB, x, y)),
     ]
 
@@ -274,9 +278,6 @@ def plot_phase_portrait(params=None, outdir=None,
         else:
             ax.tick_params(labelbottom=False)
         if p['show_ylabel']:
-            # set 5 yticks
-            yticks = np.linspace(y_lo, y_hi, 5)
-            ax.set_yticks(yticks)
             ax.set_ylabel('Predator  $y$', labelpad=4)
         else:
             ax.tick_params(labelleft=False)
@@ -294,10 +295,6 @@ def plot_phase_portrait(params=None, outdir=None,
     ]
     plot_switching_pair(axS, trajs, x_lo, x_hi, y_lo_traj, y_hi_traj)
     axS.set_title('Switching speed', pad=7)
-    # independent y-axis (not shared with the streamline panels): put its ticks
-    # and label on the outer right edge so the shared top row can stay tight.
-    axS.yaxis.set_label_position('right')
-    axS.yaxis.tick_right()
 
     # ── Save ──────────────────────────────────────────────────────────────────
     outdir = Path(outdir)
@@ -315,4 +312,4 @@ def plot_phase_portrait(params=None, outdir=None,
 
 if __name__ == '__main__':
     here = Path(__file__).resolve().parent
-    plot_phase_portrait(env_params(), outdir=here / 'plots' / 'streamlines')
+    plot_phase_portrait(env_params(), outdir=here / 'plots' / 'streamlines_kim')
