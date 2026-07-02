@@ -385,31 +385,43 @@ def plot_critical_alpha(params=None, outdir=None,
     C_LINE_DET = '#c9882e'   # warm amber, distinguishes the deterministic reference
     C_POINTS   = '#1a1a1a'   # near-black markers, matches stable-fixed-point styling
 
-    # ── Layout ───────────────────────────────────────────────────────────────
-    fig = plt.figure(figsize=(7, 5.2))
+    # ── Layout: two stacked panels — top deterministic, bottom stochastic ─────
+    # sharey lets the reader read off directly that the stochastic threshold sits
+    # above the deterministic one (faster switching needed); drop sharey below if
+    # you would rather each panel autoscale independently.
+    fig = plt.figure(figsize=(7, 9.0))
     fig.patch.set_facecolor('none')
-    gs = GridSpec(1, 1, left=0.16, right=0.96, top=0.90, bottom=0.16)
-    ax = fig.add_subplot(gs[0, 0])
+    gs = GridSpec(2, 1, left=0.16, right=0.96, top=0.965, bottom=0.095, hspace=0.10)
+    ax_det   = fig.add_subplot(gs[0, 0])
+    ax_stoch = fig.add_subplot(gs[1, 0], sharex=ax_det, sharey=ax_det)
 
-    ax.plot(gB_curve, alpha_c_det, '--', color=C_LINE_DET, linewidth=1.8,
-             label='Deterministic (equal-duty)', zorder=1)
-    ax.plot(gB_curve, alpha_c_DI, '-', color=C_LINE, linewidth=2.2,
-             label='Numerical (density iteration)', zorder=2)
-    # ax.errorbar(gB_points, alpha_c_MC_mean, yerr=alpha_c_MC_std,
+    # ── Top: deterministic equal-duty switching ───────────────────────────────
+    ax_det.plot(gB_curve, alpha_c_det, '-', color=C_LINE_DET, linewidth=2.2,
+                label='Deterministic (equal-duty)', zorder=2)
+    ax_det.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
+    ax_det.set_yscale('log')
+    ax_det.grid(False)
+    ax_det.patch.set_facecolor('none')
+    ax_det.legend(frameon=False, fontsize=18, loc='upper left')
+    plt.setp(ax_det.get_xticklabels(), visible=False)   # shared x-axis
+
+    # ── Bottom: stochastic (Poisson) switching ────────────────────────────────
+    ax_stoch.plot(gB_curve, alpha_c_DI, '-', color=C_LINE, linewidth=2.2,
+                  label='Numerical (density iteration)', zorder=2)
+    # ax_stoch.errorbar(gB_points, alpha_c_MC_mean, yerr=alpha_c_MC_std,
     #             fmt='x', color=C_POINTS, markeredgecolor=C_POINTS,
     #             markerfacecolor=C_POINTS, markersize=9, capsize=4,
     #             elinewidth=1.4, linewidth=0, label='Simulation (Monte Carlo)',
     #             zorder=5)
-    ax.plot(gB_points, alpha_c_MC_mean, 'x', markersize=9, color=C_POINTS, markeredgecolor=C_POINTS,
-             label='Simulation (Monte Carlo)',
-                zorder=5)
-
-    ax.set_xlabel(r'$\gamma_B$', labelpad=4)
-    ax.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
-    ax.set_yscale('log')
-    ax.grid(False)
-    ax.patch.set_facecolor('none')
-    ax.legend(frameon=False, fontsize=18, loc='upper left')
+    ax_stoch.plot(gB_points, alpha_c_MC_mean, 'x', markersize=9, color=C_POINTS,
+                  markeredgecolor=C_POINTS, label='Simulation (Monte Carlo)',
+                  zorder=5)
+    ax_stoch.set_xlabel(r'$\gamma_2$', labelpad=4)
+    ax_stoch.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
+    ax_stoch.set_yscale('log')
+    ax_stoch.grid(False)
+    ax_stoch.patch.set_facecolor('none')
+    ax_stoch.legend(frameon=False, fontsize=18, loc='upper left')
 
     # ── Save ──────────────────────────────────────────────────────────────────
     outdir = Path(outdir)

@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Plot three quantities vs duty cycle p.
 
-Panel 1 — y_max(T, p):  peak predator density on the 2D limit cycle
-                         (at the A→B switch moment), computed via batched
-                         vectorised RK4 over all (T, p) simultaneously.
-                         T→0 limit is y*(p) analytically.
-Panel 2 — λ(T, p):      invasion exponent family + analytical T→0 limit.
-Panel 3 — T_c(p):       critical switching period.
+Switching is characterised by its rate alpha (as in the main text): the full
+period is 2/alpha, of which env A is held a fraction p (a dwell 2p/alpha) and
+env B a fraction (1-p). At p=1/2 this is the equal dwell 1/alpha per environment.
+
+Panel 1 — y_max(alpha, p):  peak predator density on the 2D limit cycle
+                            (at the A→B switch moment), computed via batched
+                            vectorised RK4 over all (alpha, p) simultaneously.
+                            The alpha→∞ limit is y*(p) analytically.
+Panel 2 — λ(alpha, p):      invasion exponent family + analytical alpha→∞ limit.
+Panel 3 — alpha_c(p):       critical switching rate (the predator persists for
+                            alpha > alpha_c; the most robust p minimises alpha_c).
 
 Parameters:
   Env A: r=1, K=1, γ=1.1
@@ -40,7 +45,7 @@ def label_ends_only(ax):
     ax.yaxis.set_major_formatter(FuncFormatter(make_fmt(ax.get_yticks, ax.get_ylim)))
 
 
-def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
+def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
 
     # ── Parameters ───────────────────────────────────────────────────────────
     cA, cB = rA / KA, rB / KB
@@ -54,7 +59,7 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     # ── Panel 1: y_max via batched vectorised RK4 ─────────────────────────────
 
     def y_star(p):
-        """Fast-switching (T→0) predator steady state.
+        """Fast-switching (alpha→∞) predator steady state.
         The analytical expression can go negative, which is unphysical
         (the predator is extinct), so we cap it at 0."""
         return max(r_bar(p) - c_bar(p) * g_bar(p), 0.0)
@@ -153,74 +158,88 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
         except Exception:
             return np.nan, np.nan
 
-    def invasion_exponent(T, p):
-        xA, xB = periodic_fixed_points(p * T, (1 - p) * T)
+    def invasion_exponent(alpha, p):
+        # Switching rate alpha: env A held 2p/alpha, env B held 2(1-p)/alpha, so
+        # the full period is 2/alpha (equal dwell 1/alpha at p=1/2). The old 1/T
+        # prefactor of the period form becomes alpha/2.
+        tau_A, tau_B = 2.0 * p / alpha, 2.0 * (1.0 - p) / alpha
+        xA, xB = periodic_fixed_points(tau_A, tau_B)
         if not (np.isfinite(xA) and np.isfinite(xB) and xA > 0 and xB > 0):
             return np.nan
         drift    = (KA - gA) * p + (KB - gB) * (1 - p)
         log_term = (KA / rA) * np.log(xA / xB) + (KB / rB) * np.log(xB / xA)
-        return drift - log_term / T
+        return drift - (alpha / 2.0) * log_term
 
-    # ── Panel 3: T_c(p) ──────────────────────────────────────────────────────
+    # ── Panel 3: alpha_c(p) ──────────────────────────────────────────────────
 
-    def T_c(p, T_lo=1e-2, T_hi=500):
+    def alpha_c(p, a_lo=4e-3, a_hi=2e2):
+        # Critical switching rate: the root of lambda(alpha, p) = 0. Below it the
+        # predator dies (slow switching), above it it persists. The bracket
+        # [4e-3, 2e2] mirrors the old period bracket [1e-2, 500] via alpha = 2/T.
         try:
-            T_grid = np.logspace(np.log10(T_lo), np.log10(T_hi), 200)
-            lam    = np.array([invasion_exponent(T, p) for T in T_grid])
-            for i in range(len(T_grid) - 1):
+            a_grid = np.logspace(np.log10(a_lo), np.log10(a_hi), 200)
+            lam    = np.array([invasion_exponent(a, p) for a in a_grid])
+            for i in range(len(a_grid) - 1):
                 f0, f1 = lam[i], lam[i + 1]
                 if np.isfinite(f0) and np.isfinite(f1) and f0 * f1 < 0:
-                    return brentq(lambda T: invasion_exponent(T, p),
-                                  T_grid[i], T_grid[i + 1], xtol=1e-6, maxiter=200)
+                    return brentq(lambda a: invasion_exponent(a, p),
+                                  a_grid[i], a_grid[i + 1], xtol=1e-6, maxiter=200)
             return np.nan
         except Exception:
             return np.nan
 
     # ── Compute all curves ────────────────────────────────────────────────────
 
-    print("Computing y_max(T, p) via batched RK4...")
-    ymax_grid = compute_ymax_all(T_FAMILY, p_arr, steps_per_period=200, transient_periods=500)
+    # Switching-rate family -> internal periods (T = 2/alpha) for the RK4 sim.
+    periods = 2.0 / np.asarray(ALPHA_FAMILY, dtype=float)
+
+    print("Computing y_max(alpha, p) via batched RK4...")
+    ymax_grid = compute_ymax_all(periods, p_arr, steps_per_period=200, transient_periods=500)
     print(f"  done — shape {ymax_grid.shape}")
 
-    print("Computing y*(p) [T→0 analytical limit]...")
+    print("Computing y*(p) [alpha→∞ analytical limit]...")
     ymax_fast = np.array([y_star(p) for p in p_arr])
 
     print("Computing λ_fast(p)...")
     lam_fast = np.array([lambda_fast(p) for p in p_arr])
 
-    print("Computing λ(T, p) family...")
+    print("Computing λ(alpha, p) family...")
     lam_family = {}
-    for T_val in T_FAMILY:
-        lam_family[T_val] = np.array([invasion_exponent(T_val, p) for p in p_arr])
-        print(f"  T={T_val} done")
+    for a_val in ALPHA_FAMILY:
+        lam_family[a_val] = np.array([invasion_exponent(a_val, p) for p in p_arr])
+        print(f"  alpha={a_val} done")
 
-    print("Computing T_c(p)...")
-    tc_arr = np.array([T_c(p) for p in p_arr])
+    print("Computing alpha_c(p)...")
+    ac_arr = np.array([alpha_c(p) for p in p_arr])
 
     # Optima
     p_opt1 = p_opt_ystar()
     p_opt2 = p_opt_lambda()
-    valid_tc = np.isfinite(tc_arr)
-    p_opt3_idx = np.nanargmax(tc_arr[valid_tc].reshape(-1)) if np.any(valid_tc) else None
-    p_opt3     = p_arr[valid_tc][p_opt3_idx] if p_opt3_idx is not None else np.nan
-    tc_opt3    = tc_arr[valid_tc][p_opt3_idx] if p_opt3_idx is not None else np.nan
+    # Most robust duty cycle = smallest critical rate (survives down to the
+    # slowest switching), i.e. argmin of alpha_c -- the mirror of the old max-T_c.
+    valid_ac   = np.isfinite(ac_arr)
+    p_opt3_idx = np.nanargmin(ac_arr[valid_ac].reshape(-1)) if np.any(valid_ac) else None
+    p_opt3     = p_arr[valid_ac][p_opt3_idx] if p_opt3_idx is not None else np.nan
+    ac_opt3    = ac_arr[valid_ac][p_opt3_idx] if p_opt3_idx is not None else np.nan
 
-    print(f"\np_opt (y*)       = {p_opt1:.4f}")
-    print(f"p_opt (λ_fast)   = {p_opt2:.4f}")
-    print(f"p_opt (T_c min)  = {p_opt3:.4f}")
+    print(f"\np_opt (y*)         = {p_opt1:.4f}")
+    print(f"p_opt (λ_fast)     = {p_opt2:.4f}")
+    print(f"p_opt (α_c min)    = {p_opt3:.4f}")
 
     # ── Colormap shared across all panels ─────────────────────────────────────
-    # T_FAMILY curves: cool_r (blue=fast, pink=slow)
-    # T→0  limit: bold accent colour  (used in panels 1 & 2)
-    # T→∞  limit / T_c: slowest colour from the family ramp (panel 3)
+    # alpha-family curves: cool_r (blue=fast/large-alpha, pink=slow/small-alpha)
+    # alpha→∞  limit: bold accent colour  (used in panels 1 & 2)
+    # alpha_c(p): accent colour, panel 3
 
-    log_T    = np.log10(T_FAMILY)
-    t_norm   = (log_T - log_T.min()) / (log_T.max() - log_T.min())
+    log_a    = np.log10(np.asarray(ALPHA_FAMILY, dtype=float))
+    # Keep blue = fast: the largest alpha maps to 0 (the 'fast' end of cool_r),
+    # the smallest alpha to 1 (pink, slow).
+    a_norm   = (log_a.max() - log_a) / (log_a.max() - log_a.min())
     cmap     = plt.get_cmap('cool_r')
-    T_colors = [cmap(n) for n in t_norm]
+    A_colors = [cmap(n) for n in a_norm]
 
-    C_FAST = "#910a2c"   # near-black for T→0 limit (panels 1 & 2)
-    C_OPT  = "#2a2a2a"  # near-black for optimal p markers (all panels)
+    C_FAST = "#910a2c"   # accent for the alpha→∞ analytical limit (panels 1 & 2)
+    C_OPT  = "#2a2a2a"   # near-black for optimal p markers (all panels)
 
     # ── Plot ──────────────────────────────────────────────────────────────────
 
@@ -243,16 +262,16 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     ax = axes[0]
     ax.axhline(0.0, color='black', linewidth=1.0, linestyle='--', alpha=0.45)
 
-    # T→0 analytical limit
+    # alpha→∞ analytical limit
     ax.plot(p_arr, ymax_fast, color=C_FAST, linewidth=2.8, zorder=5,
-            label=r'$T\to 0$ (analytical)')
+            label=r'$\alpha\to\infty$ (analytical)')
 
-    for i, T_val in enumerate(T_FAMILY):
+    for i, a_val in enumerate(ALPHA_FAMILY):
         ym = np.where(ymax_grid[i] == 0.0, np.nan, ymax_grid[i])
-        ax.plot(p_arr, ym, color=T_colors[i], linewidth=1.6, alpha=0.85,
-                label=f'$T={T_val}$')
+        ax.plot(p_arr, ym, color=A_colors[i], linewidth=1.6, alpha=0.85,
+                label=fr'$\alpha={a_val}$')
 
-    # p_opt marker on the T→0 curve
+    # p_opt marker on the alpha→∞ curve
     if np.isfinite(p_opt1):
         y_at1 = np.interp(p_opt1, p_arr, ymax_fast)
         mark_opt(ax, p_opt1, y_at1, fr'$p_{{\rm opt}} \approx {p_opt1:.3f}$')
@@ -269,11 +288,11 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     ax.axhline(0.0, color='black', linewidth=1.0, linestyle='--', alpha=0.45)
 
     ax.plot(p_arr, lam_fast, color=C_FAST, linewidth=2.8, zorder=5,
-            label=r'$T\to 0$ (analytical)')
+            label=r'$\alpha\to\infty$ (analytical)')
 
-    for i, T_val in enumerate(T_FAMILY):
-        ax.plot(p_arr, lam_family[T_val], color=T_colors[i], linewidth=1.6, alpha=0.80,
-                label=f'$T={T_val}$')
+    for i, a_val in enumerate(ALPHA_FAMILY):
+        ax.plot(p_arr, lam_family[a_val], color=A_colors[i], linewidth=1.6, alpha=0.80,
+                label=fr'$\alpha={a_val}$')
 
     if np.isfinite(p_opt2):
         lam_at = np.interp(p_opt2, p_arr, lam_fast)
@@ -286,15 +305,15 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
     ax.set_axisbelow(True)
     ax.legend(frameon=False, loc='lower right', ncol=2, columnspacing=0.8, handlelength=1.4)
 
-    # ── Panel 3: T_c ─────────────────────────────────────────────────────────
+    # ── Panel 3: alpha_c ─────────────────────────────────────────────────────
     ax = axes[2]
-    ax.plot(p_arr, tc_arr, color=C_FAST, linewidth=2.5, label=r'$T_c(p)$')
+    ax.plot(p_arr, ac_arr, color=C_FAST, linewidth=2.5, label=r'$\alpha_c(p)$')
 
     if np.isfinite(p_opt3):
-        mark_opt(ax, p_opt3, tc_opt3, fr'$p_{{\rm opt}}^{{T_c}} \approx {p_opt3:.3f}$')
+        mark_opt(ax, p_opt3, ac_opt3, fr'$p_{{\rm opt}}^{{\alpha_c}} \approx {p_opt3:.3f}$')
 
     ax.set_xlabel('Duty cycle $p$', labelpad=-18)
-    ax.set_ylabel(r'Critical period $T_c$', labelpad=-12)
+    ax.set_ylabel(r'Critical rate $\alpha_c$', labelpad=-12)
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
@@ -314,8 +333,9 @@ def main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P):
 
 
 if __name__ == "__main__":
-    rA, KA, gA = 1.0, 1.0, 1.1
-    rB, KB, gB = 4.0, 2.0, 2.1
-    T_FAMILY   = [0.5, 1.0, 2.0, 4.0, 10.0, 20.0]
-    N_P        = 500
-    main(rA, KA, gA, rB, KB, gB, T_FAMILY, N_P)
+    rA, KA, gA   = 1.0, 1.0, 1.1
+    rB, KB, gB   = 4.0, 2.0, 2.1
+    # Switching-rate family (fast → slow); internal periods are 2/alpha = [0.5,1,2,4,10,20]
+    ALPHA_FAMILY = [4.0, 2.0, 1.0, 0.5, 0.2, 0.1]
+    N_P          = 500
+    main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P)

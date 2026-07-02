@@ -2,10 +2,12 @@
 Three-panel phase-portrait figure demonstrating R(x) theory.
 Base LV: r1=K1=1, g1=1.1, r2=4, K2=2.
 
-Three panels for three gamma2 values straddling the rescue threshold
-(gamma2* ≈ 2.31). Plotting order: blues T=4..0.5, then reds T=4..0.5
-(large T underneath). Extinct attractors shown as lines at y=0.
-Shared y-scale derived from simulated data. Constrained layout.
+Switching is characterised by its rate alpha (period 2/alpha; equal dwell
+1/alpha per environment at p=1/2). Three panels for three gamma2 values
+straddling the rescue threshold (gamma2* ≈ 2.31). Plotting order: blues
+alpha=0.5..4, then reds alpha=0.5..4 (small-alpha / slow curves underneath).
+Extinct attractors shown as lines at y=0. Shared y-scale derived from
+simulated data. Constrained layout.
 
 Geometry/fontsizes match critical_threshold_Rx.py so the two figures stack
 cleanly at the same \\linewidth.
@@ -21,7 +23,9 @@ import os
 # ── Parameters ────────────────────────────────────────────────────────────────
 r1, K1, g1 = 1.0, 1.0, 1.1
 r2, K2     = 4.0, 2.0
-T_VALUES   = [0.5, 1.0, 2.0, 4.0]   # index 0=T=0.5, index 3=T=4
+# Switching rates alpha (fast → slow); the simulation uses the period T = 2/alpha.
+ALPHA_VALUES = [4.0, 2.0, 1.0, 0.5]            # index 0=alpha=4 (fast) .. 3=alpha=0.5 (slow)
+T_VALUES     = [2.0 / a for a in ALPHA_VALUES]  # periods = [0.5, 1.0, 2.0, 4.0]
 
 # Canonical figure geometry (shared with critical_threshold_Rx.py)
 FIGSIZE   = (21, 5.6)
@@ -31,9 +35,9 @@ FS_TICK   = 15
 FS_LEGEND = 15
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-# Steel blues anchored at #547AA5, lightening for smaller T
+# Steel blues anchored at #547AA5, lightening for larger alpha (faster)
 BLUES = ['#b8cfe0', '#7aa3c0', '#547AA5', '#2d4f73']
-# Deep crimsons anchored at #901A1E, lightening for smaller T
+# Deep crimsons anchored at #901A1E, lightening for larger alpha (faster)
 REDS  = ['#d9888a', '#b84042', '#901A1E', '#5a0f11']
 
 # R(x)>0 shading: golden amber (lightened), very light fill
@@ -139,16 +143,16 @@ def plot_panel(ax, g2, label, show_ylabel, data, y_hi, show_legend=False):
 
 # ── Legend handles (two columns: blues, reds; T=4..0.5 in each) ──────────────
 def make_legend_handles():
-    # Blues column: T=4 (dark, index 3) .. T=0.5 (light, index 0)
+    # Blues column: alpha=0.5 (dark, index 3) .. alpha=4 (light, index 0)
     blue_handles = [
         Line2D([0],[0], color=BLUES[k], lw=2.5,
-               label=rf'$T={T},\ p=0.5$')
+               label=rf'$\alpha={ALPHA_VALUES[k]},\ p=0.5$')
         for k, T in reversed(list(enumerate(T_VALUES)))
     ]
-    # Reds column: same T order
+    # Reds column: same alpha order
     red_handles = [
         Line2D([0],[0], color=REDS[k], lw=2.5,
-               label=rf'$T={T},\ p=0.7$')
+               label=rf'$\alpha={ALPHA_VALUES[k]},\ p=0.7$')
         for k, T in reversed(list(enumerate(T_VALUES)))
     ]
     interleaved_handles = []

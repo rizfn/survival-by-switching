@@ -2,7 +2,7 @@
 Three-panel figure showing how multiple quantities all vanish at the same critical threshold.
 
 Left:   Base LV model   — quantities vs gamma_2  (threshold gamma_2* ≈ 2.31)
-Middle: Shielding model — quantities vs alpha_2  (threshold alpha_2* = ln 2 ≈ 0.693)
+Middle: Shielding model — quantities vs mu_2     (threshold mu_2* = ln 2 ≈ 0.693)
 Right:  Viral model     — quantities vs delta_2  (threshold delta_2* ≈ 2.70)
 
 Base LV fixed params:  r1=K1=1, gamma1=1.1, r2=4, K2=2.
@@ -67,7 +67,7 @@ def base_quantities(g2_vals):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SHIELDING MODEL  (predator death fixed at 1; env A has mu=0, env B mu=alpha_B)
+# SHIELDING MODEL  (predator death fixed at 1; env A has mu=0, env B has mu=mu_2)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def R_shield(x, aB, g=1.0, KB=2.0):
@@ -169,7 +169,7 @@ def draw_panel(ax, xvals, areas, ystars, lambdas, x_crit, xlabel, title,
     l2, = ax_r.plot(xvals, ystars,  color=BLUE,    lw=2.4, zorder=5,
                     label=r'$\max_p\, y^*$')
     l3, = ax_r.plot(xvals, lambdas, color=CRIMSON, lw=2.4, zorder=5, ls='-',
-                    label=r'$\max_p\, \Lambda_{\rm inv}$')
+                    label=r'$\max_p\, \lambda$')
 
     # 1. Solid threshold line (was dotted)
     ax.axvline(x_crit, color=THRESH_COL, lw=1.4, ls='-', zorder=2)
@@ -188,7 +188,7 @@ def draw_panel(ax, xvals, areas, ystars, lambdas, x_crit, xlabel, title,
     ax.spines['left'].set_edgecolor(AMBER_LINE)
 
     if show_ylabel_right:
-        ax_r.set_ylabel(r'$\max_p\, y^*\ $ and$\ \max_p\, \Lambda_{\rm inv}$',
+        ax_r.set_ylabel(r'$\max_p\, y^*\ $ and$\ \max_p\, \lambda$',
                         fontsize=FS_LABEL, labelpad=8, color=BLUE)
     ax_r.tick_params(axis='y', colors=BLUE)
     ax_r.spines['right'].set_edgecolor(BLUE)
@@ -297,7 +297,7 @@ def main(outpath='src/general/plots/threshold/threshold_quantities.pdf'):
         show_ylabel_left=True, show_ylabel_right=False, show_legend=True,
     )
 
-    # ── Middle: Shielding vs alpha_B ─────────────────────────────────────────
+    # ── Middle: Shielding vs mu_2 ────────────────────────────────────────────
     aB_crit = np.log(2)
     aB_vals = np.linspace(1/np.e, 1.2, 1000)
     areas2, ystars2, lambdas2 = shield_quantities(aB_vals)
