@@ -1,439 +1,403 @@
+r"""Critical switching rate alpha_c versus the swept predator death rate gamma_2.
+
+For each gamma_2 we locate the critical switching rate alpha_c at which the
+predator's invasion exponent vanishes, lambda(alpha_c) = 0: below alpha_c the
+predator dies out (switching too slow), above it the predator survives. We do
+this for both switching protocols and by two routes each, mirroring exactly the
+methods in ystar_lambda_vs_alpha.py:
+
+                       lambda(alpha) obtained from ...
+  --------------------------------------------------------------------------
+  deterministic  theory : closed-form Floquet exponent; the boundary orbit
+                          (x_a, x_b) is found by fixed-point iteration of the
+                          exact logistic flow X_E, then
+                          lambda = (K1+K2-g1-g2)/2 - (alpha/2)(K1/r1-K2/r2)ln(xa/xb).
+  deterministic  sim.   : direct RK4 of the periodic-switching resident orbit,
+                          time-averaging x(t) - gamma(t).
+  stochastic     theory : same closed form with ln(xa/xb) replaced by its
+                          stationary average A(alpha) = E[ln(xa/xb)] over
+                          exponential dwells, iterating the exact flow X_E.
+  stochastic     sim.   : direct RK4 of the telegraph-switching resident orbit,
+                          time-averaging x(t) - gamma(t).
+
+In every one of the four cases alpha_c is the root of the corresponding
+lambda(alpha) = 0, found by the *same* log-domain bisection. Theory is drawn as
+dense lines, simulation as sparse markers; the markers landing on the lines is
+the validation.
+
+Environments:  A (slow): r=1, K=1, gamma=1.1 ;  B (fast): r=4, K=2, gamma swept.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
-from scipy.optimize import brentq
-from scipy.integrate import quad
 from pathlib import Path
 from numba import njit
 
 
-# ── Ecology parameters ─────────────────────────────────────────────────────────
+# ── Environments ────────────────────────────────────────────────────────────
 
 def env_params():
     return {
         'A': {'r': 1.0, 'K': 1.0, 'gamma': 1.1},
-        'B': {'r': 4.0, 'K': 2.0},  # gamma_B is swept
+        'B': {'r': 4.0, 'K': 2.0},          # gamma_B is swept
     }
 
 
-# ── Logistic flow (used by MC, density iteration, and the deterministic curve) ─
+# ── Numba kernels (identical to ystar_lambda_vs_alpha.py) ────────────────────
 
-@njit
-def x_flow(t, x_in, r, K):
-    rt = r * t
-    if rt > 700.0:
-        return K
-    if rt < -700.0:
-        return 1e-300
-    ert = np.exp(rt)
-    return K * x_in * ert / (K + x_in * (ert - 1.0))
+@njit(cache=True, inline='always')
+def _logistic_rk4(x, r, K, dt):
+    """One RK4 step of the resident logistic flow dx/dt = r x (1 - x/K)."""
+    k1 = r * x * (1.0 - x / K)
+    xa = x + 0.5 * dt * k1; k2 = r * xa * (1.0 - xa / K)
+    xb = x + 0.5 * dt * k2; k3 = r * xb * (1.0 - xb / K)
+    xc = x + dt * k3;       k4 = r * xc * (1.0 - xc / K)
+    return x + dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-
-# ── Density iteration (deterministic / quadrature solution of lambda(alpha)=0) ─
-#
-# This solves the Perron-Frobenius equation for the stationary law of x0 by
-# discretizing the push-forward kernel on a grid and power-iterating to the
-# fixed point. No randomness is involved; "numerical" here means "quadrature",
-# not "simulation".
-#
-# IMPORTANT CAVEAT (see question 2 in the chat): this method has a systematic,
-# understood bias near both edges of the switching-paradox window, caused by
-# under-resolution of the transition kernel on a *fixed* grid - not a bug, and
-# not fixable by more burn-in (it isn't a transient effect). See the long
-# comment above plot_critical_alpha() for the full explanation. Monte Carlo
-# remains the trustworthy estimate near those edges.
-
-def make_grid(N, KMAX, z_range=20):
-    """Grid clustered near both fixed points (0 and KMAX) via a logistic
-    transform of a uniform grid in 'log-odds' space z."""
-    z = np.linspace(-z_range, z_range, N)
-    x = KMAX / (1 + np.exp(-z))
-    x = np.clip(x, 1e-12, KMAX * (1 - 1e-12))
-    return np.unique(x)
-
-def make_weights(grid):
-    """Trapezoidal quadrature weights for the (non-uniform) grid."""
-    N = len(grid)
-    w = np.zeros(N)
-    w[1:-1] = (grid[2:] - grid[:-2]) / 2
-    w[0] = (grid[1] - grid[0]) / 2
-    w[-1] = (grid[-1] - grid[-2]) / 2
-    return w
-
-@njit
-def build_transition_matrix_nb(r, K, alpha, grid, weights, KMAX):
-    """M[i, j] approx f(x1=grid[j] | x0=grid[i]) for x1 = x_flow(tau; x0),
-    tau ~ Exp(alpha), normalized so the weighted row sums to 1."""
-    N = grid.shape[0]
-    M = np.zeros((N, N))
-    eps = 1e-12
-    for i in range(N):
-        x0 = grid[i]
-        if x0 < eps:
-            x0 = eps
-        elif x0 > KMAX * (1 - eps):
-            x0 = KMAX * (1 - eps)
-        s = 0.0
-        row = np.zeros(N)
-        for j in range(N):
-            x1 = grid[j]
-            val = 0.0
-            if x0 < K:
-                if x0 < x1 < K:
-                    ratio = (x1 * (K - x0)) / (x0 * (K - x1))
-                    if ratio > 0.0:
-                        t = np.log(ratio) / r
-                        if t >= 0.0:
-                            dtdx1 = abs((1.0 / r) * (1.0 / x1 + 1.0 / (K - x1)))
-                            val = alpha * np.exp(-alpha * t) * dtdx1
-            elif x0 > K:
-                if K < x1 < x0:
-                    ratio = (x1 * (K - x0)) / (x0 * (K - x1))
-                    if ratio > 0.0:
-                        t = np.log(ratio) / r
-                        if t >= 0.0:
-                            dtdx1 = abs((1.0 / r) * (1.0 / x1 + 1.0 / (K - x1)))
-                            val = alpha * np.exp(-alpha * t) * dtdx1
-            row[j] = val
-            s += val * weights[j]
-        if s > 1e-12:
-            for j in range(N):
-                M[i, j] = row[j] / s
-        else:
-            idx_K = 0
-            best = 1e300
-            for j in range(N):
-                d = abs(grid[j] - K)
-                if d < best:
-                    best = d
-                    idx_K = j
-            M[i, idx_K] = 1.0 / weights[idx_K] if weights[idx_K] > 0 else 1.0
-    return M
-
-def lambda_density_iteration(alpha, envA, envB, grid, weights, KMAX,
-                              max_iter=400, tol=1e-13):
-    """lambda(alpha) via quadrature solution of the Perron-Frobenius equation.
-    The O(N^2) transition-matrix build is numba-jitted; the power-iteration
-    step uses numpy's BLAS matmul, which is faster than a hand-rolled loop
-    for the repeated N x N times N contraction."""
-    rA, KA, gA = envA['r'], envA['K'], envA['gamma']
-    rB, KB, gB = envB['r'], envB['K'], envB['gamma']
-    MA = build_transition_matrix_nb(rA, KA, alpha, grid, weights, KMAX)
-    MB = build_transition_matrix_nb(rB, KB, alpha, grid, weights, KMAX)
-
-    N = len(grid)
-    rho = np.ones(N)
-    rho /= np.sum(rho * weights)
-    # Power iteration: rho1(x1=j) = sum_i rho(x0=i) * weights[i] * M[i,j]
-    # -- weight goes on the SOURCE (row) index here.
-    WA_src = MA * weights[:, None]
-    WB_src = MB * weights[:, None]
-    for _ in range(max_iter):
-        rho1 = rho @ WA_src
-        rho2 = rho1 @ WB_src
-        rho2 /= np.sum(rho2 * weights)
-        diff = np.max(np.abs(rho2 - rho))
-        rho = rho2
-        if diff < tol:
-            break
-
-    # E[ln(x1/x0) | x0=i] = sum_j M[i,j] * weights[j] * ln(x1_j / x0_i)
-    # -- weight goes on the DESTINATION (column) index here, since j is now
-    # the integration variable. (Using weights[:, None] here, as if reusing
-    # WA_src, silently swaps which index gets weighted and gives a wrong
-    # answer that still looks plausible -- this was caught by cross-checking
-    # against the unvectorized loop version and against direct Monte Carlo.)
-    log_grid = np.log(grid)
-    WA_dst = MA * weights[None, :]
-    log_ratio_given_x0 = (WA_dst * (log_grid[None, :] - log_grid[:, None])).sum(axis=1)
-    A_alpha = np.sum(rho * weights * log_ratio_given_x0)
-    return (KA + KB - gA - gB) / 2 - (alpha / 2) * (KA / rA - KB / rB) * A_alpha
-
-def find_alpha_c_density_iteration(envA, envB, grid, weights, KMAX, lo=0.02, hi=20.0):
-    f = lambda a: lambda_density_iteration(a, envA, envB, grid, weights, KMAX)
-    flo, fhi = f(lo), f(hi)
-    if flo * fhi > 0:
-        return None
-    return brentq(f, lo, hi, xtol=1e-5)
+@njit(cache=True, inline='always')
+def _Xflow(t, xin, r, K):
+    # numerically stable logistic flow: avoid exp(r*t) overflow
+    z = np.exp(-r * t)
+    return K / (1.0 + (K / xin - 1.0) * z)
 
 
-# ── Monte Carlo estimate of alpha_c (stochastic simulation of the switching) ───
-#
-# The cycle-to-cycle update is an inherent Markov chain (x at cycle i depends
-# on cycle i-1), so it can't be vectorized across cycles with numpy the way
-# the inner arithmetic can. numba's JIT compiles the per-cycle Python loop
-# itself to machine code, which is what actually removes the bottleneck here
-# (roughly 10-15x faster than the numpy version per call, and the bisection /
-# multi-seed loops around it benefit directly since each call is now cheap).
+# -- deterministic (periodic) SIMULATION: lambda by direct RK4 ----------------
+# Period P = 2/alpha, each environment held P/2 = 1/alpha. We relax onto the
+# periodic resident orbit (n_trans periods) then time-average x(t) - gamma(t).
 
-@njit
-def lambda_monte_carlo_nb(alpha, rA, KA, gA, rB, KB, gB, n_cycles, seed, burn=12000):
-    np.random.seed(seed)
-    x = 1.0
-    for _ in range(burn):
-        tau = np.random.exponential(1.0 / alpha)
-        x = x_flow(tau, x, rA, KA)
-        tau = np.random.exponential(1.0 / alpha)
-        x = x_flow(tau, x, rB, KB)
-
-    total_integral = 0.0
-    total_time = 0.0
-    for _ in range(n_cycles):
-        tau_A = np.random.exponential(1.0 / alpha)
-        x0 = x
-        x1 = x_flow(tau_A, x0, rA, KA)
-        if x0 > 1e-12 and x1 > 1e-12:
-            contrib = (KA - gA) * tau_A - (KA / rA) * np.log(x1 / x0)
-        else:
-            contrib = (KA - gA) * tau_A
-        total_integral += contrib
-        total_time += tau_A
-        x = x1
-
-        tau_B = np.random.exponential(1.0 / alpha)
-        x0b = x
-        x1b = x_flow(tau_B, x0b, rB, KB)
-        if x0b > 1e-12 and x1b > 1e-12:
-            contrib = (KB - gB) * tau_B - (KB / rB) * np.log(x1b / x0b)
-        else:
-            contrib = (KB - gB) * tau_B
-        total_integral += contrib
-        total_time += tau_B
-        x = x1b
-
-    return total_integral / total_time
-
-def find_alpha_c_monte_carlo(envA, envB, seed, lo=0.02, hi=20.0, n_bisect=16, n_cycles=100000):
-    rA, KA, gA = envA['r'], envA['K'], envA['gamma']
-    rB, KB, gB = envB['r'], envB['K'], envB['gamma']
-    f = lambda a: lambda_monte_carlo_nb(a, rA, KA, gA, rB, KB, gB, n_cycles, seed)
-    flo, fhi = f(lo), f(hi)
-    if flo * fhi > 0:
-        # No sign change in [lo, hi]: widen the bracket once before giving up,
-        # since gamma_B values near the edge of the paradox window can push
-        # alpha_c outside the default range.
-        for hi_try in (hi * 5, hi * 25, hi * 125):
-            fhi_try = f(hi_try)
-            if flo * fhi_try < 0:
-                hi, fhi = hi_try, fhi_try
-                break
-        else:
-            for lo_try in (lo / 5, lo / 25, lo / 125):
-                flo_try = f(lo_try)
-                if flo_try * fhi < 0:
-                    lo, flo = lo_try, flo_try
-                    break
+@njit(cache=True)
+def lambda_periodic_sim(alpha, rA, KA, gA, rB, KB, gB, n_trans, n_meas, dt_max):
+    P = 2.0 / alpha
+    steps = int(np.ceil(P / dt_max))
+    if steps % 2 == 1:
+        steps += 1
+    if steps < 2:
+        steps = 2
+    dt = P / steps
+    x = 0.5 * (KA + KB)
+    for _ in range(n_trans):
+        for s in range(steps):
+            if 2 * s < steps:
+                x = _logistic_rk4(x, rA, KA, dt)
             else:
-                return None
+                x = _logistic_rk4(x, rB, KB, dt)
+    acc = 0.0
+    for _ in range(n_meas):
+        for s in range(steps):
+            if 2 * s < steps:
+                acc += (x - gA) * dt
+                x = _logistic_rk4(x, rA, KA, dt)
+            else:
+                acc += (x - gB) * dt
+                x = _logistic_rk4(x, rB, KB, dt)
+    return acc / (n_meas * P)
+
+
+# -- stochastic (telegraph) SIMULATION: lambda by direct RK4 ------------------
+# Symmetric two-state telegraph: toggle A<->B with probability alpha*dt per step
+# (mean dwell 1/alpha). Average x(t) - gamma(t) over the resident orbit.
+
+@njit(cache=True)
+def lambda_stochastic_sim(alpha, rA, KA, gA, rB, KB, gB,
+                          T_trans, T_meas, dt, n_runs, seed):
+    np.random.seed(seed)
+    pswitch = alpha * dt
+    nt = int(T_trans / dt)
+    nm = int(T_meas / dt)
+    total = 0.0
+    for _ in range(n_runs):
+        x = 0.5 * (KA + KB)
+        env = 0 if np.random.random() < 0.5 else 1
+        for _ in range(nt):
+            if env == 0:
+                x = _logistic_rk4(x, rA, KA, dt)
+            else:
+                x = _logistic_rk4(x, rB, KB, dt)
+            if np.random.random() < pswitch:
+                env = 1 - env
+        acc = 0.0
+        for _ in range(nm):
+            if env == 0:
+                acc += (x - gA) * dt
+                x = _logistic_rk4(x, rA, KA, dt)
+            else:
+                acc += (x - gB) * dt
+                x = _logistic_rk4(x, rB, KB, dt)
+            if np.random.random() < pswitch:
+                env = 1 - env
+        total += acc / (nm * dt)
+    return total / n_runs
+
+
+# -- deterministic THEORY: closed-form Floquet exponent -----------------------
+
+@njit(cache=True)
+def _det_orbit(alpha, rA, KA, rB, KB, iters):
+    """Turning points (x_a, x_b) of the equal-duty boundary orbit, by
+    fixed-point iteration of the two-stage closed-form map."""
+    half = 1.0 / alpha
+    xb = 0.5 * (KA + KB)
+    for _ in range(iters):
+        xa = _Xflow(half, xb, rA, KA)
+        xb = _Xflow(half, xa, rB, KB)
+    xa = _Xflow(half, xb, rA, KA)
+    return xa, xb
+
+
+@njit(cache=True)
+def lambda_det_theory(alpha, rA, KA, gA, rB, KB, gB):
+    xa, xb = _det_orbit(alpha, rA, KA, rB, KB, 600)
+    return (0.5 * (KA + KB - gA - gB)
+            - 0.5 * alpha * (KA / rA - KB / rB) * np.log(xa / xb))
+
+
+# -- stochastic THEORY: boundary-map average A(alpha) -------------------------
+# Same closed form, with ln(xa/xb) replaced by its stationary mean over the
+# random boundary map (exponential dwells). One fixed seed across alpha keeps
+# the estimate smooth in alpha, so the bisection below sees a clean sign change.
+
+@njit(cache=True)
+def _A_stoch(alpha, rA, KA, rB, KB, n_burn, n_samp, seed):
+    np.random.seed(seed)
+    xb = 0.5 * (KA + KB)
+    for _ in range(n_burn):
+        t1 = -np.log(np.random.random()) / alpha
+        xa = _Xflow(t1, xb, rA, KA)
+        t2 = -np.log(np.random.random()) / alpha
+        xb = _Xflow(t2, xa, rB, KB)
+    s = 0.0
+    for _ in range(n_samp):
+        t1 = -np.log(np.random.random()) / alpha
+        xa = _Xflow(t1, xb, rA, KA)
+        s += np.log(xa / xb)
+        t2 = -np.log(np.random.random()) / alpha
+        xb = _Xflow(t2, xa, rB, KB)
+    return s / n_samp
+
+
+@njit(cache=True)
+def lambda_stoch_theory(alpha, rA, KA, gA, rB, KB, gB, n_burn, n_samp, seed):
+    A = _A_stoch(alpha, rA, KA, rB, KB, n_burn, n_samp, seed)
+    return (0.5 * (KA + KB - gA - gB)
+            - 0.5 * alpha * (KA / rA - KB / rB) * A)
+
+
+# ── Shared alpha_c root finder ───────────────────────────────────────────────
+# lambda(alpha) is negative at slow switching (extinction) and positive at fast
+# switching (survival), crossing zero once. We bracket that single crossing and
+# bisect in log(alpha) -- the same routine for all four lambda(alpha) above, so
+# deterministic and stochastic alpha_c are computed by an identical algorithm.
+
+def alpha_c_root(f, lo=0.05, hi=10.0, n_bisect=40):
+    """Root of f(alpha)=0 (f increasing through one zero) by log bisection.
+    Returns nan if no sign change can be bracketed (e.g. gamma_2 outside the
+    switching-rescue window, where the predator dies at every alpha)."""
+    flo, fhi = f(lo), f(hi)
+    if flo * fhi > 0.0:
+        # Widen the fast side first (alpha_c can be large near the upper edge),
+        # then the slow side, before giving up.
+        bracketed = False
+        for hi_try in (hi * 5.0, hi * 25.0, hi * 125.0):
+            fhi_try = f(hi_try)
+            if flo * fhi_try < 0.0:
+                hi, fhi, bracketed = hi_try, fhi_try, True
+                break
+        if not bracketed:
+            for lo_try in (lo / 5.0, lo / 25.0, lo / 125.0):
+                flo_try = f(lo_try)
+                if flo_try * fhi < 0.0:
+                    lo, flo, bracketed = lo_try, flo_try, True
+                    break
+        if not bracketed:
+            return np.nan
     for _ in range(n_bisect):
-        mid = (lo + hi) / 2
+        mid = np.sqrt(lo * hi)                 # geometric (log) midpoint
         fmid = f(mid)
-        if flo * fmid < 0:
+        if flo * fmid <= 0.0:
             hi = mid
         else:
             lo, flo = mid, fmid
-    return (lo + hi) / 2
+    return np.sqrt(lo * hi)
 
 
-# ── Deterministic equal-duty reference curve ────────────────────────────────────
-
-def lambda_det_periodic(T, envA, envB):
-    """lambda(T) on the periodic orbit for deterministic equal-duty switching."""
-    rA, KA, gA = envA['r'], envA['K'], envA['gamma']
-    rB, KB, gB = envB['r'], envB['K'], envB['gamma']
-    if T < 1e-9:
-        x_star = (rA + rB) / (rA / KA + rB / KB)
-        return x_star - (gA + gB) / 2
-    def residual(x0):
-        return x_flow(T / 2, x_flow(T / 2, x0, rA, KA), rB, KB) - x0
-    lo, hi = 1e-9, KB * (1 - 1e-13)
-    r_lo, r_hi = residual(lo), residual(hi)
-    x0 = KB * (1 - 1e-13) if r_lo * r_hi > 0 else brentq(residual, lo, hi, xtol=1e-14)
-    x1 = x_flow(T / 2, x0, rA, KA)
-    IA, _ = quad(lambda t: x_flow(t, x0, rA, KA) - gA, 0, T / 2, limit=200)
-    IB, _ = quad(lambda t: x_flow(t, x1, rB, KB) - gB, 0, T / 2, limit=200)
-    return (IA + IB) / T
-
-def find_Tc(envA, envB):
-    T_vals = np.logspace(-2, 3.3, 200)
-    lam_prev = lambda_det_periodic(T_vals[0], envA, envB)
-    for i in range(1, len(T_vals)):
-        lam_cur = lambda_det_periodic(T_vals[i], envA, envB)
-        if lam_prev * lam_cur < 0:
-            return brentq(lambda T: lambda_det_periodic(T, envA, envB),
-                           T_vals[i - 1], T_vals[i], xtol=1e-8)
-        lam_prev = lam_cur
-    return None
+def alpha_c_sim_mean(lam_of_alpha_seed, n_reps, seed0, **root_kw):
+    """Simulation alpha_c averaged over independent seeds (mean, std). Each rep
+    fixes a seed so lambda(alpha) is deterministic and the bisection is clean;
+    different reps give independent estimates."""
+    vals = []
+    for rep in range(n_reps):
+        ac = alpha_c_root(lambda a: lam_of_alpha_seed(a, seed0 + rep), **root_kw)
+        if np.isfinite(ac):
+            vals.append(ac)
+    if not vals:
+        return np.nan, np.nan
+    return float(np.mean(vals)), float(np.std(vals))
 
 
-# ── Main plot ─────────────────────────────────────────────────────────────────
-#
-# Why density iteration and Monte Carlo disagree near both edges of the
-# paradox window (gamma_B near 2.0 or near 2.333 here):
-#
-# It is NOT a transient/burn-in effect. Burn-in was tested from 1,000 to
-# 1,000,000 steps and the MC estimate barely moves -- the chain mixes fast.
-#
-# The real cause is that density iteration discretizes the transition kernel
-# f(x1 | x0) on a FIXED grid, and that kernel's width depends on alpha:
-#
-#   - At LARGE alpha (near the high-gamma_B edge, where alpha_c is large):
-#     dwells are short, so x1 stays close to x0. The kernel becomes a narrow
-#     spike of width ~ 1/alpha *anywhere* in the domain, including the bulk,
-#     where the grid (built to be fine near the two fixed points 0 and K) is
-#     comparatively coarse. A narrow spike straddling only 1-2 grid cells is
-#     not resolved by trapezoidal quadrature, biasing the estimate.
-#
-#   - At SMALL alpha (near the low-gamma_B edge, where alpha_c is small):
-#     dwells are long, so x1 sits very close to the environment's fixed point
-#     K. The kernel develops a genuine boundary-layer singularity there
-#     (|dt/dx1| -> infinity as x1 -> K), and the bulk of the probability mass
-#     (>80% in some cases checked) can fall within a window as thin as 1e-3
-#     of K. Increasing the grid density near the boundary helps, but the
-#     convergence is logarithmically slow -- pushing N from 1,800 to 6,000
-#     only closed a small fraction of the gap, at a large cost in runtime.
-#
-# Both mechanisms are the same underlying issue (a kernel narrower than the
-# local grid spacing), just appearing at opposite ends of the alpha range.
-# Monte Carlo has no such resolution limit -- it samples the true continuous
-# kernel directly -- so the MC points are the trustworthy reference near the
-# edges, and the density-iteration curve should be read as exact in the
-# interior of the gamma_B range and increasingly approximate near its ends.
+# ── Sweep over gamma_2 ───────────────────────────────────────────────────────
 
-def plot_critical_alpha(params=None, outdir=None,
-                         gB_curve=None, gB_points=None, n_mc_reps=4,
-                         N_grid=1800, n_cycles=150000):
+def compute(params, gB_curve, gB_points,
+            # deterministic
+            det_dt=0.01, det_nbisect=40,
+            # stochastic theory (boundary map)
+            sto_burn=3000, sto_samp=150_000, sto_theory_seed=99, sto_th_nbisect=40,
+            # stochastic simulation (telegraph ODE)
+            sto_dt=0.0025, sto_Ttrans=300.0, sto_Tmeas=1200.0,
+            sto_nruns=16, sto_nreps=3, sto_sim_seed0=5000, sto_sim_nbisect=24):
+
+    A, B = params['A'], params['B']
+    rA, KA, gA = A['r'], A['K'], A['gamma']
+    rB, KB = B['r'], B['K']
+
+    def det_counts(alpha):
+        """Absolute-time-matched period counts (mirrors ystar file)."""
+        P = 2.0 / alpha
+        n_tr = max(200, int(np.ceil(400.0 / P)))
+        n_me = max(60,  int(np.ceil(60.0 / P)))
+        return n_tr, n_me
+
+    # ── Warm up the JIT once, outside the timed loops ─────────────────────────
+    lambda_det_theory(1.0, rA, KA, gA, rB, KB, 2.1)
+    lambda_stoch_theory(1.0, rA, KA, gA, rB, KB, 2.1, 10, 10, 0)
+    lambda_periodic_sim(1.0, rA, KA, gA, rB, KB, 2.1, 2, 2, 0.05)
+    lambda_stochastic_sim(1.0, rA, KA, gA, rB, KB, 2.1, 1.0, 1.0, 0.01, 1, 0)
+
+    # ── Theory lines (dense) ──────────────────────────────────────────────────
+    print("Deterministic theory (closed form) ...")
+    ac_det_th = np.array([
+        alpha_c_root(lambda a: lambda_det_theory(a, rA, KA, gA, rB, KB, gB),
+                     n_bisect=det_nbisect)
+        for gB in gB_curve])
+
+    print("Stochastic theory (boundary-map A) ...")
+    ac_sto_th = np.array([
+        alpha_c_root(lambda a: lambda_stoch_theory(a, rA, KA, gA, rB, KB, gB,
+                                                   sto_burn, sto_samp, sto_theory_seed),
+                     n_bisect=sto_th_nbisect)
+        for gB in gB_curve])
+
+    # ── Simulation points (sparse) ────────────────────────────────────────────
+    print("Deterministic simulation (periodic RK4) ...")
+    ac_det_sim = []
+    for gB in gB_points:
+        def f_det(a, _seed, gB=gB):
+            n_tr, n_me = det_counts(a)
+            return lambda_periodic_sim(a, rA, KA, gA, rB, KB, gB, n_tr, n_me, det_dt)
+        m, _ = alpha_c_sim_mean(f_det, 1, 0, n_bisect=det_nbisect)   # deterministic
+        ac_det_sim.append(m)
+        print(f"  gamma_2={gB:.3f}: alpha_c(det sim) = {m}")
+    ac_det_sim = np.array(ac_det_sim)
+
+    print(f"Stochastic simulation (telegraph RK4, n_runs={sto_nruns}, "
+          f"n_reps={sto_nreps}) ...")
+    ac_sto_sim, ac_sto_sim_std = [], []
+    for gB in gB_points:
+        def f_sto(a, seed, gB=gB):
+            return lambda_stochastic_sim(a, rA, KA, gA, rB, KB, gB,
+                                         sto_Ttrans, sto_Tmeas, sto_dt, sto_nruns, seed)
+        m, s = alpha_c_sim_mean(f_sto, sto_nreps, sto_sim_seed0,
+                                n_bisect=sto_sim_nbisect)
+        ac_sto_sim.append(m)
+        ac_sto_sim_std.append(s)
+        print(f"  gamma_2={gB:.3f}: alpha_c(stoch sim) = {m} +/- {s}")
+    ac_sto_sim = np.array(ac_sto_sim)
+    ac_sto_sim_std = np.array(ac_sto_sim_std)
+
+    return dict(gB_curve=gB_curve, gB_points=gB_points,
+                ac_det_th=ac_det_th, ac_sto_th=ac_sto_th,
+                ac_det_sim=ac_det_sim,
+                ac_sto_sim=ac_sto_sim, ac_sto_sim_std=ac_sto_sim_std)
+
+
+# ── Plot ─────────────────────────────────────────────────────────────────────
+
+def plot(params=None, outdir=None,
+         gB_lo=2.00, gB_hi=2.24, n_dense=60, n_points=11,
+         show_stoch_errorbars=False, **compute_kw):
     if params is None:
         params = env_params()
-    if gB_curve is None:
-        gB_curve = np.linspace(2.00, 2.24, 100)
-    if gB_points is None:
-        gB_points = np.linspace(2.00, 2.24, 16)
 
     plt.rcParams.update({
-        'font.size':        20,
-        'axes.titlesize':   20,
-        'axes.titleweight': 'normal',
-        'axes.labelsize':   20,
-        'xtick.labelsize':  16,
-        'ytick.labelsize':  16,
-        'axes.linewidth':   1.1,
+        'font.size':        22,
+        'axes.titlesize':   22,
+        'axes.labelsize':   26,
+        'xtick.labelsize':  20,
+        'ytick.labelsize':  20,
+        'axes.linewidth':   1.2,
         'xtick.direction':  'in',
         'ytick.direction':  'in',
-        'xtick.major.size': 5,
-        'ytick.major.size': 5,
+        'xtick.major.size': 6,
+        'ytick.major.size': 6,
+        'legend.fontsize':  16,
         'pdf.fonttype':     42,
         'svg.fonttype':     'none',
     })
 
-    envA = params['A']
-    envB_base = params['B']
-    KMAX = max(envA['K'], envB_base['K'])
+    gB_curve  = np.linspace(gB_lo, gB_hi, n_dense)
+    # keep the simulation points inset from the window edges, where alpha_c
+    # diverges and the sign change is hard to bracket from a simulation.
+    gB_points = np.linspace(gB_lo + 0.02, gB_hi - 0.03, n_points)
 
-    # ── Warm up the JIT compiler once, outside the timed sweeps ─────────────────
-    _grid_warm = make_grid(10000, KMAX)
-    _weights_warm = make_weights(_grid_warm)
-    lambda_density_iteration(1.0, envA, {**envB_base, 'gamma': 2.2},
-                              _grid_warm, _weights_warm, KMAX, max_iter=10)
-    lambda_monte_carlo_nb(1.0, envA['r'], envA['K'], envA['gamma'],
-                          envB_base['r'], envB_base['K'], 2.2, 100, 0, burn=10)
+    d = compute(params, gB_curve, gB_points, **compute_kw)
 
-    # ── Semi-analytical curve: density iteration (quadrature, no randomness) ───
-    print("Computing density-iteration curve...")
-    grid = make_grid(N_grid, KMAX)
-    weights = make_weights(grid)
-    alpha_c_DI = []
-    for gB in gB_curve:
-        envB = {**envB_base, 'gamma': gB}
-        ac = find_alpha_c_density_iteration(envA, envB, grid, weights, KMAX)
-        alpha_c_DI.append(ac if ac is not None else np.nan)
-        print(f"  gamma_B={gB:.4f}: alpha_c (density iteration) = {ac}")
-    alpha_c_DI = np.array(alpha_c_DI, dtype=float)
+    # sanity print at the standard operating point
+    A, B = params['A'], params['B']
+    p = (A['r'], A['K'], A['gamma'], B['r'], B['K'])
+    ac_det_21 = alpha_c_root(lambda a: lambda_det_theory(a, *p, 2.1))
+    ac_sto_21 = alpha_c_root(lambda a: lambda_stoch_theory(a, *p, 2.1, 5000, 10**6, 271828))
+    print(f"\nAt gamma_2 = 2.1:  alpha_c(det) = {ac_det_21:.3f}, "
+          f"alpha_c(stoch) = {ac_sto_21:.3f}")
 
-    # ── Simulated points: Monte Carlo, several seeds for error bars ────────────
-    print("Computing Monte Carlo points...")
-    gB_points_kept, alpha_c_MC_mean, alpha_c_MC_std = [], [], []
-    for gB in gB_points:
-        envB = {**envB_base, 'gamma': gB}
-        ests = [find_alpha_c_monte_carlo(envA, envB, seed=100 + rep, n_cycles=n_cycles)
-                for rep in range(n_mc_reps)]
-        ests = [e for e in ests if e is not None]
-        if len(ests) == 0:
-            print(f"  gamma_B={gB:.3f}: no sign change found even after widening "
-                  f"the bracket; skipping this point")
-            continue
-        gB_points_kept.append(gB)
-        alpha_c_MC_mean.append(np.mean(ests))
-        alpha_c_MC_std.append(np.std(ests))
-        print(f"  gamma_B={gB:.3f}: alpha_c (MC) = {np.mean(ests):.4f} +/- {np.std(ests):.4f}"
-              f"  ({len(ests)}/{n_mc_reps} reps succeeded)")
-    gB_points = np.array(gB_points_kept)
-    alpha_c_MC_mean = np.array(alpha_c_MC_mean)
-    alpha_c_MC_std = np.array(alpha_c_MC_std)
+    C_DET = '#1f3b73'   # deterministic — deep blue
+    C_STO = '#c0392b'   # stochastic    — brick red
 
-    # ── Reference curve: deterministic equal-duty switching ────────────────────
-    print("Computing deterministic reference curve...")
-    alpha_c_det = []
-    for gB in gB_curve:
-        envB = {**envB_base, 'gamma': gB}
-        Tc = find_Tc(envA, envB)
-        alpha_c_det.append(2 / Tc if Tc else np.nan)
-    alpha_c_det = np.array(alpha_c_det)
-
-    # ── Style ─────────────────────────────────────────────────────────────────
-    C_LINE     = '#7d1d96'   # deep magenta-purple, consistent with the plasma family
-    C_LINE_DET = '#c9882e'   # warm amber, distinguishes the deterministic reference
-    C_POINTS   = '#1a1a1a'   # near-black markers, matches stable-fixed-point styling
-
-    # ── Layout: two stacked panels — top deterministic, bottom stochastic ─────
-    # sharey lets the reader read off directly that the stochastic threshold sits
-    # above the deterministic one (faster switching needed); drop sharey below if
-    # you would rather each panel autoscale independently.
-    fig = plt.figure(figsize=(7, 9.0))
+    fig = plt.figure(figsize=(7.4, 5.6))
     fig.patch.set_facecolor('none')
-    gs = GridSpec(2, 1, left=0.16, right=0.96, top=0.965, bottom=0.095, hspace=0.10)
-    ax_det   = fig.add_subplot(gs[0, 0])
-    ax_stoch = fig.add_subplot(gs[1, 0], sharex=ax_det, sharey=ax_det)
+    gs = GridSpec(1, 1, left=0.17, right=0.96, top=0.95, bottom=0.16)
+    ax = fig.add_subplot(gs[0, 0])
+    ax.patch.set_facecolor('none')
 
-    # ── Top: deterministic equal-duty switching ───────────────────────────────
-    ax_det.plot(gB_curve, alpha_c_det, '-', color=C_LINE_DET, linewidth=2.2,
-                label='Deterministic (equal-duty)', zorder=2)
-    ax_det.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
-    ax_det.set_yscale('log')
-    ax_det.grid(False)
-    ax_det.patch.set_facecolor('none')
-    ax_det.legend(frameon=False, fontsize=18, loc='upper left')
-    plt.setp(ax_det.get_xticklabels(), visible=False)   # shared x-axis
+    # theory lines
+    ax.plot(d['gB_curve'], d['ac_det_th'], '-', color=C_DET, lw=2.6, zorder=3,
+            label='Deterministic — theory')
+    ax.plot(d['gB_curve'], d['ac_sto_th'], '-', color=C_STO, lw=2.6, zorder=3,
+            label='Stochastic — theory')
 
-    # ── Bottom: stochastic (Poisson) switching ────────────────────────────────
-    ax_stoch.plot(gB_curve, alpha_c_DI, '-', color=C_LINE, linewidth=2.2,
-                  label='Numerical (density iteration)', zorder=2)
-    # ax_stoch.errorbar(gB_points, alpha_c_MC_mean, yerr=alpha_c_MC_std,
-    #             fmt='x', color=C_POINTS, markeredgecolor=C_POINTS,
-    #             markerfacecolor=C_POINTS, markersize=9, capsize=4,
-    #             elinewidth=1.4, linewidth=0, label='Simulation (Monte Carlo)',
-    #             zorder=5)
-    ax_stoch.plot(gB_points, alpha_c_MC_mean, 'x', markersize=9, color=C_POINTS,
-                  markeredgecolor=C_POINTS, label='Simulation (Monte Carlo)',
-                  zorder=5)
-    ax_stoch.set_xlabel(r'$\gamma_2$', labelpad=4)
-    ax_stoch.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
-    ax_stoch.set_yscale('log')
-    ax_stoch.grid(False)
-    ax_stoch.patch.set_facecolor('none')
-    ax_stoch.legend(frameon=False, fontsize=18, loc='upper left')
+    # simulation markers (open, matching the attached file's style)
+    ax.plot(d['gB_points'], d['ac_det_sim'], 'o', color=C_DET, ms=8,
+            markerfacecolor='white', markeredgewidth=1.8, zorder=5,
+            label='Deterministic — simulation')
+    if show_stoch_errorbars:
+        ax.errorbar(d['gB_points'], d['ac_sto_sim'], yerr=d['ac_sto_sim_std'],
+                    fmt='s', color=C_STO, ms=8, markerfacecolor='white',
+                    markeredgewidth=1.8, capsize=4, elinewidth=1.4, zorder=5,
+                    label='Stochastic — simulation')
+    else:
+        ax.plot(d['gB_points'], d['ac_sto_sim'], 's', color=C_STO, ms=8,
+                markerfacecolor='white', markeredgewidth=1.8, zorder=5,
+                label='Stochastic — simulation')
 
-    # ── Save ──────────────────────────────────────────────────────────────────
+    ax.set_xlabel(r'$\gamma_2$', labelpad=4)
+    ax.set_ylabel(r'Critical rate  $\alpha_c$', labelpad=4)
+    ax.set_yscale('log')
+    ax.grid(False)
+    ax.legend(frameon=False, loc='upper left')
+
+    # ── Save (filename carries the fixed parameters + the swept range) ────────
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    outpath = outdir / 'critical_alpha.svg'
-    plt.savefig(outpath, dpi=300, format='svg',
-                bbox_inches='tight', facecolor='none', transparent=True)
-    plt.savefig(outpath.with_suffix('.pdf'), dpi=300, format='pdf',
-                bbox_inches='tight', facecolor='none', transparent=True)
+    tag = (f"rA{A['r']:g}_KA{A['K']:g}_gA{A['gamma']:g}"
+           f"_rB{B['r']:g}_KB{B['K']:g}"
+           f"_gBsweep{gB_lo:g}-{gB_hi:g}")
+    outpath = outdir / f'critical_alpha_{tag}.svg'
+    fig.savefig(outpath, dpi=300, bbox_inches='tight',
+                facecolor='none', transparent=True)
+    fig.savefig(outpath.with_suffix('.pdf'), dpi=300, bbox_inches='tight',
+                facecolor='none', transparent=True)
     plt.close(fig)
-    print(f"Saved: {outpath}")
+    print(f"Saved: {outpath} (+ .pdf)")
 
 
 if __name__ == '__main__':
-    plot_critical_alpha(env_params(), outdir='src/3paramLogisticLVStochastic/plots/critical_alpha')
+    plot(env_params(), outdir='src/3paramLogisticLVStochastic/plots/critical_alpha')

@@ -320,7 +320,7 @@ def plot_phase_portrait(params=None, outdir=None,
              label_xy=(0.7, 0.03), label_ha='left', label_va='center'),
         dict(xs=xs_slow, ys=ys_slow, cmap=CMAP_SLOW,
              label='Slow switching', label_color=C_SLOW_DARK,
-             label_xy=(0.3, 0.0), label_ha='left', label_va='bottom'),
+             label_xy=(0.28, 0.0), label_ha='left', label_va='bottom'),
     ]
     plot_switching_pair(axS, trajs, x_lo, x_hi, y_lo_traj, y_hi_traj)
     # keep tick MARKERS at 0.01–0.04, but only LABEL 0.00 and 0.05
