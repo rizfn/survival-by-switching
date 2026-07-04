@@ -144,7 +144,7 @@ def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
     def periodic_fixed_points(tau_A, tau_B):
         def residual(xB):
             return phi(tau_B, phi(tau_A, xB, KA, rA), KB, rB) - xB
-        lo, hi = min(KA, KB) * 1e-4, max(KA, KB) * (1 - 1e-6)
+        lo, hi = min(KA, KB) * 1e-4, max(KA, KB)
         try:
             flo, fhi = residual(lo), residual(hi)
             if flo * fhi > 0:
@@ -248,7 +248,9 @@ def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
         'xtick.labelsize': 20, 'ytick.labelsize': 20, 'legend.fontsize': 18,
     })
 
-    fig, axes = plt.subplots(1, 3, figsize=(20, 6), layout='constrained')
+    # Height bumped from 6 -> 8.5 to make room for the below-axes legends
+    # (panels 1 & 2 have 8 entries at ncol=2 -> 4 rows).
+    fig, axes = plt.subplots(1, 3, figsize=(20, 8.5), layout='constrained')
     fig.patch.set_facecolor('none')
     for ax in axes:
         ax.set_facecolor('none')
@@ -281,7 +283,8 @@ def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
-    ax.legend(frameon=False, loc='lower right', ncol=2, columnspacing=0.8, handlelength=1.4)
+    ax.legend(frameon=False, loc='upper center', bbox_to_anchor=(0.5, -0.10),
+              ncol=2, columnspacing=0.8, handlelength=1.4)
 
     # ── Panel 2: λ ────────────────────────────────────────────────────────────
     ax = axes[1]
@@ -303,7 +306,8 @@ def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
-    ax.legend(frameon=False, loc='lower right', ncol=2, columnspacing=0.8, handlelength=1.4)
+    ax.legend(frameon=False, loc='upper center', bbox_to_anchor=(0.5, -0.10),
+              ncol=2, columnspacing=0.8, handlelength=1.4)
 
     # ── Panel 3: alpha_c ─────────────────────────────────────────────────────
     ax = axes[2]
@@ -317,7 +321,8 @@ def main(rA, KA, gA, rB, KB, gB, ALPHA_FAMILY, N_P):
     ax.set_xlim(0, 1)
     ax.grid(True, linestyle='--', alpha=0.25)
     ax.set_axisbelow(True)
-    ax.legend(frameon=False, loc='best')
+    ax.legend(frameon=False, loc='upper center', bbox_to_anchor=(0.5, -0.10),
+              ncol=1)
 
     # ── Keep all ticks, but label only the extreme ticks on every axis ──────────
     for ax in axes:
