@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Switched ODE Phase Space</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            cursor: crosshair;
+            background-color: #fafafa;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #0052a3;
+        }
+        .legend {
+            display: flex;
+            gap: 20px;
+            font-size: 14px;
+        }
+        .legend span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .color-box {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Switched Environments Phase Space</h2>
+    
+    <div class="controls">
+        <div class="control-group">
+            <label for="mode">Switching Mode:</label>
+            <select id="mode">
+                <option value="periodic">Periodic</option>
+                <option value="poisson">Poisson</option>
+            </select>
+        </div>
+        
+        <div class="control-group">
+            <label for="alpha">Switching Rate (&alpha;): <span id="alpha-val">2.0</span></label>
+            <input type="range" id="alpha" min="0.1" max="100.0" step="0.1" value="2.0">
+        </div>
+
+        <div class="control-group">
+            <label for="epsilon">Epsilon (&epsilon;): <span id="eps-val">0.5</span></label>
+            <input type="range" id="epsilon" min="0.1" max="100.0" step="0.1" value="0.5">
+        </div>
+
+        <button id="clear-btn">Clear Plot</button>
+    </div>
+
+    <div class="legend">
+        <span><div class="color-box" style="background: #0066cc;"></div> Environment 1 Active</span>
+        <span><div class="color-box" style="background: #cc0000;"></div> Environment 2 Active</span>
+    </div>
+
+    <canvas id="plot" width="600" height="600"></canvas>
+    <p><em>Click anywhere on the plot to set a new initial condition (x, y) and start tracing.</em></p>
+</div>
+
+<script>
+    const canvas = document.getElementById('plot');
+    const ctx = canvas.getContext('2d');
+    
+    // UI Elements
+    const modeSelect = document.getElementById('mode');
+    const alphaSlider = document.getElementById('alpha');
+    const epsilonSlider = document.getElementById('epsilon');
+    const alphaVal = document.getElementById('alpha-val');
+    const epsVal = document.getElementById('eps-val');
+    const clearBtn = document.getElementById('clear-btn');
+
+    // Simulation Parameters
+    const MAX_VAL = 1.5; // Max x and y for the plot limits
+    const dt = 0.01;     // Integration time step
+    
+    // State variables
+    let isSimulating = false;
+    let x = 0;
+    let y = 0;
+    let currentEnv = 1;
+    let timeInEnv = 0;
+    let animationId;
+
+    // Update slider labels
+    alphaSlider.oninput = () => alphaVal.textContent = alphaSlider.value;
+    epsilonSlider.oninput = () => epsVal.textContent = epsilonSlider.value;
+
+    // Coordinate mapping functions
+    function toScreenX(mathX) { return (mathX / MAX_VAL) * canvas.width; }
+    function toScreenY(mathY) { return canvas.height - (mathY / MAX_VAL) * canvas.height; }
+    function toMathX(screenX) { return (screenX / canvas.width) * MAX_VAL; }
+    function toMathY(screenY) { return ((canvas.height - screenY) / canvas.height) * MAX_VAL; }
+
+    // Draw Axes
+    function drawAxes() {
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        // Grid lines could go here, but keeping it clean with just boundary
+        ctx.strokeRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#999';
+        ctx.font = '14px Arial';
+        ctx.fillText("x", canvas.width - 15, canvas.height - 5);
+        ctx.fillText("y", 5, 15);
+    }
+
+    // Clear canvas
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawAxes();
+        isSimulating = false;
+        cancelAnimationFrame(animationId);
+    }
+
+    // ODE definitions
+    function getDerivatives(x, y, env, eps) {
+        if (env === 1) {
+            return {
+                dx: eps * x * (1 - x - 2 * y),
+                dy: y * (1 - 2 * x - y)
+            };
+        } else {
+            return {
+                dx: x * (1 - x - y / 4),
+                dy: eps * y * (1 - x - y / 2)
+            };
+        }
+    }
+
+    // Runge-Kutta 4th Order Integration
+    function stepRK4(eps) {
+        const k1 = getDerivatives(x, y, currentEnv, eps);
+        const k2 = getDerivatives(x + 0.5 * dt * k1.dx, y + 0.5 * dt * k1.dy, currentEnv, eps);
+        const k3 = getDerivatives(x + 0.5 * dt * k2.dx, y + 0.5 * dt * k2.dy, currentEnv, eps);
+        const k4 = getDerivatives(x + dt * k3.dx, y + dt * k3.dy, currentEnv, eps);
+
+        x += (dt / 6) * (k1.dx + 2 * k2.dx + 2 * k3.dx + k4.dx);
+        y += (dt / 6) * (k1.dy + 2 * k2.dy + 2 * k3.dy + k4.dy);
+    }
+
+    // Simulation Loop
+    function simulate() {
+        if (!isSimulating) return;
+
+        const mode = modeSelect.value;
+        const alpha = parseFloat(alphaSlider.value);
+        const eps = parseFloat(epsilonSlider.value);
+        
+        // Save old position for drawing
+        const oldX = x;
+        const oldY = y;
+
+        // Integration step
+        stepRK4(eps);
+        timeInEnv += dt;
+
+        // Switching Logic
+        if (mode === 'periodic') {
+            const T = 1.0 / alpha;
+            if (timeInEnv >= T) {
+                currentEnv = currentEnv === 1 ? 2 : 1;
+                timeInEnv = 0;
+            }
+        } else if (mode === 'poisson') {
+            if (Math.random() < alpha * dt) {
+                currentEnv = currentEnv === 1 ? 2 : 1;
+                timeInEnv = 0;
+            }
+        }
+
+        // Draw line segment
+        ctx.beginPath();
+        ctx.moveTo(toScreenX(oldX), toScreenY(oldY));
+        ctx.lineTo(toScreenX(x), toScreenY(y));
+        ctx.strokeStyle = currentEnv === 1 ? '#0066cc' : '#cc0000';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Stop if out of bounds or crashed to 0 (to prevent infinite looping in the void)
+        if (x < -0.1 || y < -0.1 || x > MAX_VAL * 1.5 || y > MAX_VAL * 1.5) {
+            isSimulating = false;
+            return;
+        }
+
+        // We run multiple steps per frame to speed up the visual drawing
+        // If you want it to draw slower, remove this loop and just rely on requestAnimationFrame
+        for(let i=0; i<5; i++) {
+            const innerOldX = x;
+            const innerOldY = y;
+            stepRK4(eps);
+            timeInEnv += dt;
+            
+            if (mode === 'periodic' && timeInEnv >= 1.0 / alpha) {
+                currentEnv = currentEnv === 1 ? 2 : 1;
+                timeInEnv = 0;
+            } else if (mode === 'poisson' && Math.random() < alpha * dt) {
+                currentEnv = currentEnv === 1 ? 2 : 1;
+                timeInEnv = 0;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(toScreenX(innerOldX), toScreenY(innerOldY));
+            ctx.lineTo(toScreenX(x), toScreenY(y));
+            ctx.strokeStyle = currentEnv === 1 ? '#0066cc' : '#cc0000';
+            ctx.stroke();
+        }
+
+        animationId = requestAnimationFrame(simulate);
+    }
+
+    // Interactions
+    canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        x = toMathX(mouseX);
+        y = toMathY(mouseY);
+        timeInEnv = 0;
+        currentEnv = 1; // Default to starting in env 1
+
+        if (!isSimulating) {
+            isSimulating = true;
+            simulate();
+        }
+    });
+
+    clearBtn.addEventListener('click', clearCanvas);
+
+    // Initial setup
+    drawAxes();
+</script>
+
+</body>
+</html>
